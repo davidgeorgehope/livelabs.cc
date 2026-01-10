@@ -118,10 +118,10 @@ def update_enrollment_env(
             detail="Enrollment not found"
         )
 
-    # Merge with existing environment
-    current_env = enrollment.environment or {}
-    current_env.update(environment)
-    enrollment.environment = current_env
+    # Merge with existing environment (create new dict for SQLAlchemy change detection)
+    new_env = dict(enrollment.environment or {})
+    new_env.update(environment)
+    enrollment.environment = new_env
 
     db.commit()
     db.refresh(enrollment)
