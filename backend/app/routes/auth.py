@@ -73,3 +73,10 @@ def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
 @router.get("/me", response_model=schemas.UserWithOrg)
 def get_me(current_user: models.User = Depends(auth.get_current_user)):
     return current_user
+
+
+@router.post("/refresh", response_model=schemas.Token)
+def refresh_token(current_user: models.User = Depends(auth.get_current_user)):
+    """Refresh an access token using a valid token"""
+    access_token = auth.create_access_token(data={"sub": current_user.id})
+    return schemas.Token(access_token=access_token)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { organizations, OrganizationPublic } from "@/lib/api";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -15,17 +16,44 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [orgSlug, setOrgSlug] = useState("");
+  const [orgMode, setOrgMode] = useState<"create" | "join">("create");
+  const [newOrgName, setNewOrgName] = useState("");
+  const [selectedOrg, setSelectedOrg] = useState("");
+  const [availableOrgs, setAvailableOrgs] = useState<OrganizationPublic[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Password validation
+  const passwordChecks = {
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    digit: /\d/.test(password),
+  };
+  const isPasswordValid = passwordChecks.length && passwordChecks.uppercase && passwordChecks.digit;
+
+  // Fetch available organizations on mount
+  useEffect(() => {
+    organizations.listPublic()
+      .then(setAvailableOrgs)
+      .catch(() => setAvailableOrgs([]));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (!isPasswordValid) {
+      setError("Password does not meet requirements");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      await register(email, password, name, orgSlug || undefined);
+      // If joining an existing org, pass the slug
+      // If creating new, pass undefined (backend will auto-create)
+      const orgSlug = orgMode === "join" ? selectedOrg : undefined;
+      await register(email, password, name, orgSlug);
       router.push("/learn");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
@@ -82,25 +110,80 @@ export default function RegisterPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Choose a password"
                 required
-                minLength={6}
               />
+              <div className="text-xs space-y-1">
+                <p className={passwordChecks.length ? "text-green-600" : "text-muted-foreground"}>
+                  {passwordChecks.length ? "\u2713" : "\u2022"} At least 8 characters
+                </p>
+                <p className={passwordChecks.uppercase ? "text-green-600" : "text-muted-foreground"}>
+                  {passwordChecks.uppercase ? "\u2713" : "\u2022"} At least one uppercase letter
+                </p>
+                <p className={passwordChecks.digit ? "text-green-600" : "text-muted-foreground"}>
+                  {passwordChecks.digit ? "\u2713" : "\u2022"} At least one number
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="orgSlug">Organization (optional)</Label>
-              <Input
-                id="orgSlug"
-                type="text"
-                value={orgSlug}
-                onChange={(e) => setOrgSlug(e.target.value)}
-                placeholder="Join existing org by slug"
-              />
-              <p className="text-xs text-muted-foreground">
-                Leave empty to create a new organization
-              </p>
+            <div className="space-y-3">
+              <Label>Organization</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={orgMode === "create" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setOrgMode("create")}
+                  className="flex-1"
+                >
+                  Create New
+                </Button>
+                <Button
+                  type="button"
+                  variant={orgMode === "join" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setOrgMode("join")}
+                  className="flex-1"
+                  disabled={availableOrgs.length === 0}
+                >
+                  Join Existing
+                </Button>
+              </div>
+
+              {orgMode === "create" ? (
+                <div className="space-y-2">
+                  <Input
+                    type="text"
+                    value={newOrgName}
+                    onChange={(e) => setNewOrgName(e.target.value)}
+                    placeholder="Organization name (optional)"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave empty to auto-generate from your email
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <select
+                    value={selectedOrg}
+                    onChange={(e) => setSelectedOrg(e.target.value)}
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                    required={orgMode === "join"}
+                  >
+                    <option value="">Select an organization...</option>
+                    {availableOrgs.map((org) => (
+                      <option key={org.slug} value={org.slug}>
+                        {org.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isLoading || !isPasswordValid}
+            >
               {isLoading ? "Creating account..." : "Sign Up"}
             </Button>
 

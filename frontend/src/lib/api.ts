@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "") + "/api";
 
 type FetchOptions = RequestInit & {
   token?: string | null;
@@ -71,6 +71,17 @@ export interface Organization {
   created_at: string;
 }
 
+export interface OrganizationPublic {
+  id: number;
+  slug: string;
+  name: string;
+}
+
+export interface OrganizationCreateRequest {
+  name: string;
+  slug?: string;
+}
+
 export const auth = {
   login: (data: LoginRequest) =>
     fetchAPI<Token>("/auth/login", {
@@ -86,6 +97,34 @@ export const auth = {
 
   me: (token: string) =>
     fetchAPI<User>("/auth/me", { token }),
+
+  refresh: (token: string) =>
+    fetchAPI<Token>("/auth/refresh", {
+      method: "POST",
+      token,
+    }),
+};
+
+// Organizations
+export const organizations = {
+  listPublic: () =>
+    fetchAPI<OrganizationPublic[]>("/organizations/public"),
+
+  create: (data: OrganizationCreateRequest, token: string) =>
+    fetchAPI<Organization>("/organizations", {
+      method: "POST",
+      body: JSON.stringify(data),
+      token,
+    }),
+
+  getMy: (token: string) =>
+    fetchAPI<Organization>("/organizations/my", { token }),
+
+  join: (slug: string, token: string) =>
+    fetchAPI<User>(`/organizations/${slug}/join`, {
+      method: "POST",
+      token,
+    }),
 };
 
 // Tracks

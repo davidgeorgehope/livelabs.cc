@@ -1,6 +1,7 @@
+import re
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 
 # Organization schemas
@@ -11,6 +12,22 @@ class OrganizationBase(BaseModel):
 
 class OrganizationCreate(OrganizationBase):
     pass
+
+
+class OrganizationCreateRequest(BaseModel):
+    """Request schema for creating an organization - slug is optional"""
+    name: str
+    slug: Optional[str] = None  # Auto-generated from name if not provided
+
+
+class OrganizationPublic(BaseModel):
+    """Public organization info - for listing available orgs"""
+    id: int
+    slug: str
+    name: str
+
+    class Config:
+        from_attributes = True
 
 
 class Organization(OrganizationBase):
@@ -30,6 +47,17 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
     org_slug: Optional[str] = None  # Join existing org or create new
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        if not any(c.isupper() for c in v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one digit')
+        return v
 
 
 class UserLogin(BaseModel):

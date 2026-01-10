@@ -1,7 +1,10 @@
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file before other imports that use env vars
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import engine, Base, SessionLocal
-from .routes import auth, tracks, steps, enrollments, execute
+from .routes import auth, tracks, steps, enrollments, execute, organizations
 from . import models
 from .auth import get_password_hash
 
@@ -14,21 +17,29 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS
+# CORS - Allow production and development origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3004",
+        "http://127.0.0.1:3004",
+        "https://livelabs.cc",
+        "https://www.livelabs.cc",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(auth.router)
-app.include_router(tracks.router)
-app.include_router(steps.router)
-app.include_router(enrollments.router)
-app.include_router(execute.router)
+# Include routers under /api prefix
+app.include_router(auth.router, prefix="/api")
+app.include_router(organizations.router, prefix="/api")
+app.include_router(tracks.router, prefix="/api")
+app.include_router(steps.router, prefix="/api")
+app.include_router(enrollments.router, prefix="/api")
+app.include_router(execute.router, prefix="/api")
 
 
 @app.get("/")
