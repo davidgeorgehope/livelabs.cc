@@ -25,25 +25,22 @@ class TestListEnrollments:
 
 class TestCreateEnrollment:
     def test_enroll_success(self, client: TestClient, test_track, auth_headers):
+        # Environment comes from track.env_secrets, not from learner
         response = client.post(
             "/api/enrollments",
             headers=auth_headers,
-            json={
-                "track_slug": test_track.slug,
-                "environment": {"API_KEY": "my-secret-key"},
-            },
+            json={"track_slug": test_track.slug},
         )
         assert response.status_code == 201
         data = response.json()
         assert data["track_id"] == test_track.id
         assert data["current_step"] == 1
-        assert data["environment"]["API_KEY"] == "my-secret-key"
 
     def test_enroll_track_not_found(self, client: TestClient, auth_headers):
         response = client.post(
             "/api/enrollments",
             headers=auth_headers,
-            json={"track_slug": "nonexistent", "environment": {}},
+            json={"track_slug": "nonexistent"},
         )
         assert response.status_code == 404
 
@@ -53,25 +50,10 @@ class TestCreateEnrollment:
         response = client.post(
             "/api/enrollments",
             headers=auth_headers,
-            json={
-                "track_slug": test_track.slug,
-                "environment": {"API_KEY": "another-key"},
-            },
+            json={"track_slug": test_track.slug},
         )
         assert response.status_code == 400
         assert "Already enrolled" in response.json()["detail"]
-
-    def test_enroll_missing_required_env(self, client: TestClient, test_track, auth_headers):
-        response = client.post(
-            "/api/enrollments",
-            headers=auth_headers,
-            json={
-                "track_slug": test_track.slug,
-                "environment": {},  # Missing required API_KEY
-            },
-        )
-        assert response.status_code == 400
-        assert "Missing required" in response.json()["detail"]
 
 
 class TestGetEnrollment:
@@ -99,29 +81,6 @@ class TestGetEnrollment:
             f"/api/enrollments/{test_enrollment.id}", headers=author_headers
         )
         assert response.status_code == 404  # Not found for this user
-
-
-class TestUpdateEnrollmentEnv:
-    def test_update_env_success(
-        self, client: TestClient, test_enrollment, auth_headers
-    ):
-        response = client.patch(
-            f"/api/enrollments/{test_enrollment.id}/environment",
-            headers=auth_headers,
-            json={"NEW_VAR": "new-value", "API_KEY": "updated-key"},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["environment"]["NEW_VAR"] == "new-value"
-        assert data["environment"]["API_KEY"] == "updated-key"
-
-    def test_update_env_not_found(self, client: TestClient, auth_headers):
-        response = client.patch(
-            "/api/enrollments/99999/environment",
-            headers=auth_headers,
-            json={"VAR": "value"},
-        )
-        assert response.status_code == 404
 
 
 class TestDeleteEnrollment:

@@ -17,11 +17,13 @@ else
   echo "  Backend already running on 8003"
 fi
 
-# Frontend
+# Frontend (production mode - much less memory usage)
 if ! netstat -tlnp 2>/dev/null | grep -q ":3004 "; then
-  echo "  Starting frontend on 3004..."
+  echo "  Building frontend..."
   cd frontend
-  nohup npm run dev -- -p 3004 > /tmp/livelabs-frontend.log 2>&1 &
+  npm run build > /tmp/livelabs-frontend-build.log 2>&1
+  echo "  Starting frontend on 3004 (production mode)..."
+  nohup npm run start -- -p 3004 > /tmp/livelabs-frontend.log 2>&1 &
   cd ..
   sleep 3
 else

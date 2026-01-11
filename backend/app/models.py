@@ -24,6 +24,8 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     name = Column(String(255), nullable=False)
     is_author = Column(Boolean, default=False)
+    is_admin = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -43,7 +45,11 @@ class Track(Base):
     is_published = Column(Boolean, default=False)
     author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
-    env_template = Column(JSON, default=list)  # List of {name, description, required}
+    env_template = Column(JSON, default=list)  # List of {name, description, required} - documentation for authors
+    env_secrets = Column(JSON, default=dict)  # Dict of {name: value} - author-configured secrets, injected at runtime
+    tags = Column(JSON, default=list)  # List of tag strings (e.g., ["kubernetes", "python"])
+    difficulty = Column(String(20), default="beginner")  # beginner, intermediate, advanced
+    estimated_minutes = Column(Integer, nullable=True)  # Estimated completion time
     created_at = Column(DateTime, default=datetime.utcnow)
 
     author = relationship("User", back_populates="tracks")
@@ -100,3 +106,78 @@ class Execution(Base):
 
     enrollment = relationship("Enrollment", back_populates="executions")
     step = relationship("Step", back_populates="executions")
+
+
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(8), unique=True, index=True, nullable=False)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    max_uses = Column(Integer, nullable=True)  # None = unlimited
+    uses = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    organization = relationship("Organization", backref="invite_codes")
+    created_by = relationship("User", backref="created_invite_codes")
+
+
+class Achievement(Base):
+    __tablename__ = "achievements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String(50), unique=True, index=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text)
+    icon = Column(String(50), default="trophy")  # Icon name
+    color = Column(String(20), default="gold")  # Badge color
+    xp_value = Column(Integer, default=100)
+    criteria_type = Column(String(50), nullable=False)  # tracks_completed, first_track, etc.
+    criteria_value = Column(Integer, default=1)  # Number needed to unlock
+
+
+class UserAchievement(Base):
+    __tablename__ = "user_achievements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    achievement_id = Column(Integer, ForeignKey("achievements.id"), nullable=False)
+    earned_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", backref="achievements")
+    achievement = relationship("Achievement", backref="user_achievements")
+
+
+class GitHubConnection(Base):
+    """Stores GitHub OAuth connection for a user"""
+    __tablename__ = "github_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    github_user_id = Column(Integer, nullable=False)
+    github_username = Column(String(100), nullable=False)
+    access_token = Column(String(255), nullable=False)  # Encrypted in production
+    scope = Column(String(255), nullable=True)  # OAuth scopes granted
+    connected_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", backref="github_connection")
+
+
+class TrackGitSync(Base):
+    """Tracks GitHub sync status for a track"""
+    __tablename__ = "track_git_syncs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True)
+    repo_owner = Column(String(100), nullable=False)
+    repo_name = Column(String(100), nullable=False)
+    branch = Column(String(100), default="main")
+    last_sync_at = Column(DateTime, nullable=True)
+    last_sync_sha = Column(String(40), nullable=True)  # Git commit SHA
+    sync_direction = Column(String(10), default="push")  # push, pull, both
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    track = relationship("Track", backref="git_sync")

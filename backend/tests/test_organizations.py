@@ -117,3 +117,151 @@ class TestJoinOrganization:
             headers=auth_headers,
         )
         assert response.status_code == 404
+
+
+class TestInviteCodes:
+    def test_create_invite_code(self, client: TestClient, auth_headers):
+        """Can create an invite code for my organization"""
+        response = client.post(
+            "/api/organizations/my/invite-codes",
+            json={},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert "code" in data
+        assert len(data["code"]) == 6
+        assert data["is_active"] is True
+        assert data["uses"] == 0
+
+    def test_create_invite_code_with_max_uses(self, client: TestClient, auth_headers):
+        """Can create invite code with usage limit"""
+        response = client.post(
+            "/api/organizations/my/invite-codes",
+            json={"max_uses": 5},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["max_uses"] == 5
+
+    def test_create_invite_code_with_expiry(self, client: TestClient, auth_headers):
+        """Can create invite code with expiration"""
+        response = client.post(
+            "/api/organizations/my/invite-codes",
+            json={"expires_in_days": 7},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["expires_at"] is not None
+
+    def test_list_invite_codes(self, client: TestClient, auth_headers):
+        """Can list my organization's invite codes"""
+        # Create a code first
+        client.post(
+            "/api/organizations/my/invite-codes",
+            json={},
+            headers=auth_headers,
+        )
+
+        response = client.get(
+            "/api/organizations/my/invite-codes",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) >= 1
+
+    def test_validate_invite_code_valid(self, client: TestClient, auth_headers):
+        """Can validate a valid invite code"""
+        # Create a code
+        create_response = client.post(
+            "/api/organizations/my/invite-codes",
+            json={},
+            headers=auth_headers,
+        )
+        code = create_response.json()["code"]
+
+        # Validate it (public endpoint)
+        response = client.get(f"/api/organizations/invite/{code}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid"] is True
+        assert data["organization"] is not None
+
+    def test_validate_invite_code_invalid(self, client: TestClient):
+        """Invalid invite code returns valid=false"""
+        response = client.get("/api/organizations/invite/INVALID")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid"] is False
+        assert "invalid" in data["message"].lower()
+
+    def test_deactivate_invite_code(self, client: TestClient, auth_headers):
+        """Can deactivate an invite code"""
+        # Create a code
+        create_response = client.post(
+            "/api/organizations/my/invite-codes",
+            json={},
+            headers=auth_headers,
+        )
+        code = create_response.json()["code"]
+
+        # Deactivate it
+        response = client.delete(
+            f"/api/organizations/my/invite-codes/{code}",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
+        # Validate should fail
+        validate_response = client.get(f"/api/organizations/invite/{code}")
+        assert validate_response.json()["valid"] is False
+
+    def test_register_with_invite_code(self, client: TestClient, auth_headers, db):
+        """Can register with a valid invite code"""
+        # Create a code
+        create_response = client.post(
+            "/api/organizations/my/invite-codes",
+            json={},
+            headers=auth_headers,
+        )
+        code = create_response.json()["code"]
+
+        # Register new user with code
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "email": "invited@example.com",
+                "password": "Password123",
+                "name": "Invited User",
+                "invite_code": code,
+            },
+        )
+        assert response.status_code == 200
+        assert "access_token" in response.json()
+
+        # Check invite code usage incremented
+        codes_response = client.get(
+            "/api/organizations/my/invite-codes",
+            headers=auth_headers,
+        )
+        codes = codes_response.json()
+        invite = next(c for c in codes if c["code"] == code)
+        assert invite["uses"] == 1
+
+    def test_register_with_invalid_invite_code(self, client: TestClient):
+        """Cannot register with invalid invite code"""
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "email": "new@example.com",
+                "password": "Password123",
+                "name": "New User",
+                "invite_code": "INVALID",
+            },
+        )
+        assert response.status_code == 400
+        assert "invalid" in response.json()["detail"].lower()

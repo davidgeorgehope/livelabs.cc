@@ -7,7 +7,7 @@ import { tracks, Track } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Edit, Trash2 } from "lucide-react";
+import { Plus, Edit, Trash2, BarChart3 } from "lucide-react";
 
 export default function AuthorDashboardPage() {
   const router = useRouter();
@@ -54,12 +54,20 @@ export default function AuthorDashboardPage() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-2xl font-bold">My Tracks</h1>
-        <Link href="/author/new">
-          <Button>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Track
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/author/analytics">
+            <Button variant="outline">
+              <BarChart3 className="h-4 w-4 mr-2" />
+              Analytics
+            </Button>
+          </Link>
+          <Link href="/author/new">
+            <Button>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Track
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {error && <div className="text-red-500 mb-4">{error}</div>}

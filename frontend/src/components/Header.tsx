@@ -24,6 +24,12 @@ export function Header() {
                   Author
                 </Link>
               )}
+              <Link href="/profile" className="text-sm text-muted-foreground hover:text-foreground">
+                Profile
+              </Link>
+              <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground">
+                Settings
+              </Link>
             </nav>
           )}
         </div>

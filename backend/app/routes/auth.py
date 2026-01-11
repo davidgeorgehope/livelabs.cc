@@ -8,6 +8,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=schemas.Token)
 def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
+    from datetime import datetime
+
     # Check if email exists
     existing = db.query(models.User).filter(models.User.email == user_data.email).first()
     if existing:
@@ -16,8 +18,43 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
             detail="Email already registered"
         )
 
-    # Find or create organization
-    if user_data.org_slug:
+    invite = None
+    org = None
+
+    # Priority: invite_code > org_slug > create new org
+    if user_data.invite_code:
+        # Validate and use invite code
+        invite = db.query(models.InviteCode).filter(
+            models.InviteCode.code == user_data.invite_code.upper()
+        ).first()
+
+        if not invite:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid invite code"
+            )
+
+        if not invite.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This invite code has been deactivated"
+            )
+
+        if invite.expires_at and invite.expires_at < datetime.utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This invite code has expired"
+            )
+
+        if invite.max_uses and invite.uses >= invite.max_uses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This invite code has reached its maximum uses"
+            )
+
+        org = invite.organization
+
+    elif user_data.org_slug:
         org = db.query(models.Organization).filter(
             models.Organization.slug == user_data.org_slug
         ).first()
@@ -49,6 +86,11 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
         org_id=org.id
     )
     db.add(user)
+
+    # Increment invite code usage if used
+    if invite:
+        invite.uses += 1
+
     db.commit()
     db.refresh(user)
 

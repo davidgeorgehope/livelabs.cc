@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas, auth
 from ..database import get_db
@@ -6,17 +6,42 @@ from ..database import get_db
 router = APIRouter(prefix="/enrollments", tags=["enrollments"])
 
 
-@router.get("", response_model=list[schemas.EnrollmentWithTrack])
+@router.get("", response_model=schemas.PaginatedResponse[schemas.EnrollmentWithTrack])
 def list_enrollments(
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.get_current_user),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    status_filter: str = Query(None, description="Filter by status: active, completed")
 ):
-    """List current user's enrollments"""
-    return db.query(models.Enrollment).options(
+    """List current user's enrollments with pagination"""
+    query = db.query(models.Enrollment).options(
         joinedload(models.Enrollment.track)
     ).filter(
         models.Enrollment.user_id == current_user.id
-    ).order_by(models.Enrollment.started_at.desc()).all()
+    )
+
+    # Filter by completion status
+    if status_filter == "active":
+        query = query.filter(models.Enrollment.completed_at.is_(None))
+    elif status_filter == "completed":
+        query = query.filter(models.Enrollment.completed_at.isnot(None))
+
+    # Get total count
+    total = query.count()
+
+    # Order and paginate
+    offset = (page - 1) * page_size
+    items = query.order_by(models.Enrollment.started_at.desc()).offset(offset).limit(page_size).all()
+    pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    return schemas.PaginatedResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages
+    )
 
 
 @router.post("", response_model=schemas.Enrollment, status_code=status.HTTP_201_CREATED)
@@ -55,19 +80,10 @@ def create_enrollment(
             detail="Already enrolled in this track"
         )
 
-    # Validate required env vars
-    required_vars = [e["name"] for e in (track.env_template or []) if e.get("required", True)]
-    missing_vars = [v for v in required_vars if v not in enrollment_data.environment]
-    if missing_vars:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Missing required environment variables: {', '.join(missing_vars)}"
-        )
-
+    # Environment comes from track.env_secrets now, not from learner
     enrollment = models.Enrollment(
         user_id=current_user.id,
         track_id=track.id,
-        environment=enrollment_data.environment,
         current_step=1
     )
     db.add(enrollment)
@@ -96,35 +112,6 @@ def get_enrollment(
             detail="Enrollment not found"
         )
 
-    return enrollment
-
-
-@router.patch("/{enrollment_id}/environment", response_model=schemas.Enrollment)
-def update_enrollment_env(
-    enrollment_id: int,
-    environment: dict[str, str],
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
-):
-    """Update enrollment environment variables"""
-    enrollment = db.query(models.Enrollment).filter(
-        models.Enrollment.id == enrollment_id,
-        models.Enrollment.user_id == current_user.id
-    ).first()
-
-    if not enrollment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Enrollment not found"
-        )
-
-    # Merge with existing environment (create new dict for SQLAlchemy change detection)
-    new_env = dict(enrollment.environment or {})
-    new_env.update(environment)
-    enrollment.environment = new_env
-
-    db.commit()
-    db.refresh(enrollment)
     return enrollment
 
 

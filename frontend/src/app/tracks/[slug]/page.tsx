@@ -5,8 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { tracks, enrollments, TrackWithSteps } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { EnvConfigModal } from "@/components/EnvConfigModal";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function TrackPreviewPage() {
   const params = useParams();
@@ -15,7 +14,6 @@ export default function TrackPreviewPage() {
   const [track, setTrack] = useState<TrackWithSteps | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showEnvModal, setShowEnvModal] = useState(false);
   const [isEnrolling, setIsEnrolling] = useState(false);
 
   const slug = params.slug as string;
@@ -28,28 +26,20 @@ export default function TrackPreviewPage() {
       .finally(() => setIsLoading(false));
   }, [slug, token]);
 
-  const handleEnroll = async (environment: Record<string, string>) => {
-    if (!token) {
+  const handleStartClick = async () => {
+    if (!user || !token) {
       router.push("/login");
       return;
     }
 
     setIsEnrolling(true);
     try {
-      const enrollment = await enrollments.create({ track_slug: slug, environment }, token);
+      const enrollment = await enrollments.create(slug, token);
       router.push(`/learn/${enrollment.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Enrollment failed");
       setIsEnrolling(false);
     }
-  };
-
-  const handleStartClick = () => {
-    if (!user) {
-      router.push("/login");
-      return;
-    }
-    setShowEnvModal(true);
   };
 
   if (isLoading) {
@@ -105,41 +95,10 @@ export default function TrackPreviewPage() {
           </CardContent>
         </Card>
 
-        {track.env_template && track.env_template.length > 0 && (
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle className="text-lg">Required Configuration</CardTitle>
-              <CardDescription>
-                You&apos;ll need to provide these values to start the track
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2">
-                {track.env_template.map((env) => (
-                  <li key={env.name} className="flex items-start gap-2">
-                    <code className="bg-muted px-2 py-0.5 rounded text-sm">{env.name}</code>
-                    {env.description && (
-                      <span className="text-sm text-muted-foreground">{env.description}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
-
-        <Button size="lg" onClick={handleStartClick}>
-          {user ? "Start Track" : "Login to Start"}
+        <Button size="lg" onClick={handleStartClick} disabled={isEnrolling}>
+          {!user ? "Login to Start" : isEnrolling ? "Starting..." : "Start Track"}
         </Button>
       </div>
-
-      <EnvConfigModal
-        open={showEnvModal}
-        onOpenChange={setShowEnvModal}
-        envTemplate={track.env_template || []}
-        onSubmit={handleEnroll}
-        isLoading={isEnrolling}
-      />
     </div>
   );
 }

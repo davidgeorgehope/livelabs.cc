@@ -1,7 +1,18 @@
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Generic, TypeVar
 from pydantic import BaseModel, EmailStr, field_validator
+
+T = TypeVar("T")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    """Generic paginated response wrapper"""
+    items: list[T]
+    total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 # Organization schemas
@@ -47,6 +58,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
     org_slug: Optional[str] = None  # Join existing org or create new
+    invite_code: Optional[str] = None  # Use invite code to join org
 
     @field_validator('password')
     @classmethod
@@ -101,10 +113,13 @@ class TrackBase(BaseModel):
     description: Optional[str] = ""
     docker_image: Optional[str] = "livelabs-runner:latest"
     env_template: list[EnvVar] = []
+    tags: list[str] = []
+    difficulty: str = "beginner"  # beginner, intermediate, advanced
+    estimated_minutes: Optional[int] = None
 
 
 class TrackCreate(TrackBase):
-    pass
+    env_secrets: dict[str, str] = {}  # Author-configured environment secrets
 
 
 class TrackUpdate(BaseModel):
@@ -113,6 +128,10 @@ class TrackUpdate(BaseModel):
     docker_image: Optional[str] = None
     is_published: Optional[bool] = None
     env_template: Optional[list[EnvVar]] = None
+    env_secrets: Optional[dict[str, str]] = None  # Author-configured environment secrets
+    tags: Optional[list[str]] = None
+    difficulty: Optional[str] = None
+    estimated_minutes: Optional[int] = None
 
 
 class Track(TrackBase):
@@ -126,7 +145,18 @@ class Track(TrackBase):
         from_attributes = True
 
 
+class TrackWithSecrets(Track):
+    """Track schema for authors that includes env_secrets"""
+    env_secrets: dict[str, str] = {}
+
+
 class TrackWithSteps(Track):
+    steps: list["Step"] = []
+    author: User
+
+
+class TrackWithStepsAndSecrets(TrackWithSecrets):
+    """Track with steps and secrets - for author editing"""
     steps: list["Step"] = []
     author: User
 
@@ -165,7 +195,7 @@ class Step(StepBase):
 # Enrollment schemas
 class EnrollmentCreate(BaseModel):
     track_slug: str
-    environment: dict[str, str] = {}
+    # Note: environment is no longer needed - track secrets are used instead
 
 
 class Enrollment(BaseModel):
@@ -173,7 +203,6 @@ class Enrollment(BaseModel):
     user_id: int
     track_id: int
     current_step: int
-    environment: dict[str, str]
     started_at: datetime
     completed_at: Optional[datetime] = None
 
@@ -219,5 +248,74 @@ class ExecutionResult(BaseModel):
     advanced: bool = False  # Did validation pass and advance the step?
 
 
+# Invite code schemas
+class InviteCodeCreate(BaseModel):
+    max_uses: Optional[int] = None  # None = unlimited
+    expires_in_days: Optional[int] = None  # None = never expires
+
+
+class InviteCode(BaseModel):
+    id: int
+    code: str
+    org_id: int
+    max_uses: Optional[int]
+    uses: int
+    is_active: bool
+    expires_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class InviteCodeWithOrg(InviteCode):
+    organization: Organization
+
+
+class InviteCodeValidation(BaseModel):
+    """Response when validating an invite code"""
+    valid: bool
+    organization: Optional[OrganizationPublic] = None
+    message: str
+
+
+# Achievement schemas
+class Achievement(BaseModel):
+    id: int
+    slug: str
+    name: str
+    description: Optional[str]
+    icon: str
+    color: str
+    xp_value: int
+
+    class Config:
+        from_attributes = True
+
+
+class UserAchievement(BaseModel):
+    id: int
+    achievement: Achievement
+    earned_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserStats(BaseModel):
+    total_xp: int
+    tracks_completed: int
+    achievements_count: int
+    achievements: list[UserAchievement]
+
+
+class CertificateData(BaseModel):
+    user_name: str
+    track_title: str
+    completed_at: str
+    certificate_id: str
+
+
 # Update forward refs
 TrackWithSteps.model_rebuild()
+TrackWithStepsAndSecrets.model_rebuild()

@@ -2,24 +2,24 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { tracks, steps, Track, Step, TrackWithSteps, StepCreate, StepUpdate } from "@/lib/api";
+import { tracks, steps, Step, TrackWithStepsAndSecrets, StepCreate, StepUpdate, TrackUpdate } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScriptEditor } from "@/components/ScriptEditor";
-import { Plus, Save, Trash2, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { StepIDE } from "@/components/StepIDE";
+import { GitSync } from "@/components/GitSync";
+import { Plus, Save, Trash2, ArrowLeft, Eye, EyeOff, Settings } from "lucide-react";
 
 export default function TrackEditorPage() {
   const params = useParams();
   const router = useRouter();
   const { token, isLoading: authLoading } = useAuth();
-  const [track, setTrack] = useState<TrackWithSteps | null>(null);
+  const [track, setTrack] = useState<TrackWithStepsAndSecrets | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Step form state
@@ -27,14 +27,34 @@ export default function TrackEditorPage() {
   const [stepInstructions, setStepInstructions] = useState("");
   const [setupScript, setSetupScript] = useState("");
   const [validationScript, setValidationScript] = useState("");
+  const [stepHints, setStepHints] = useState<string[]>([]);
+
+  // Track settings state
+  const [showSettings, setShowSettings] = useState(false);
+  const [trackTags, setTrackTags] = useState("");
+  const [trackDifficulty, setTrackDifficulty] = useState("beginner");
+  const [trackEstimatedMinutes, setTrackEstimatedMinutes] = useState("");
+  const [trackDescription, setTrackDescription] = useState("");
+  const [envSecrets, setEnvSecrets] = useState<{ name: string; value: string }[]>([]);
 
   const slug = params.slug as string;
 
   const loadTrack = useCallback(async () => {
     if (!token) return;
     try {
-      const data = await tracks.get(slug, token);
+      const data = await tracks.getForEditing(slug, token);
       setTrack(data);
+      // Initialize track settings
+      setTrackTags(data.tags?.join(", ") || "");
+      setTrackDifficulty(data.difficulty || "beginner");
+      setTrackEstimatedMinutes(data.estimated_minutes?.toString() || "");
+      setTrackDescription(data.description || "");
+      // Initialize env secrets
+      const secrets = Object.entries(data.env_secrets || {}).map(([name, value]) => ({
+        name,
+        value,
+      }));
+      setEnvSecrets(secrets.length > 0 ? secrets : [{ name: "", value: "" }]);
       if (data.steps.length > 0 && !selectedStepId) {
         selectStep(data.steps[0]);
       }
@@ -60,6 +80,34 @@ export default function TrackEditorPage() {
     setStepInstructions(step.instructions_md);
     setSetupScript(step.setup_script);
     setValidationScript(step.validation_script);
+    setStepHints(step.hints || []);
+    setHasUnsavedChanges(false);
+  };
+
+  // Wrappers to track unsaved changes
+  const handleInstructionsChange = (value: string) => {
+    setStepInstructions(value);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleSetupScriptChange = (value: string) => {
+    setSetupScript(value);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleValidationScriptChange = (value: string) => {
+    setValidationScript(value);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleTitleChange = (value: string) => {
+    setStepTitle(value);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleHintsChange = (hints: string[]) => {
+    setStepHints(hints);
+    setHasUnsavedChanges(true);
   };
 
   const handleAddStep = async () => {
@@ -90,10 +138,12 @@ export default function TrackEditorPage() {
       instructions_md: stepInstructions,
       setup_script: setupScript,
       validation_script: validationScript,
+      hints: stepHints,
     };
 
     try {
       await steps.update(slug, selectedStepId, update, token);
+      setHasUnsavedChanges(false);
       await loadTrack();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save step");
@@ -114,6 +164,7 @@ export default function TrackEditorPage() {
         setStepInstructions("");
         setSetupScript("");
         setValidationScript("");
+        setStepHints([]);
       }
       await loadTrack();
     } catch (err) {
@@ -130,6 +181,51 @@ export default function TrackEditorPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update track");
     }
+  };
+
+  const handleSaveTrackSettings = async () => {
+    if (!token || !track) return;
+
+    setIsSaving(true);
+    // Convert env secrets array to object
+    const secretsObj: Record<string, string> = {};
+    envSecrets.forEach(({ name, value }) => {
+      if (name.trim()) {
+        secretsObj[name.trim()] = value;
+      }
+    });
+
+    const update: TrackUpdate = {
+      description: trackDescription,
+      tags: trackTags.split(",").map(t => t.trim()).filter(t => t),
+      difficulty: trackDifficulty,
+      estimated_minutes: trackEstimatedMinutes ? parseInt(trackEstimatedMinutes) : undefined,
+      env_secrets: secretsObj,
+    };
+
+    try {
+      await tracks.update(slug, update, token);
+      await loadTrack();
+      setShowSettings(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update track");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddSecret = () => {
+    setEnvSecrets([...envSecrets, { name: "", value: "" }]);
+  };
+
+  const handleRemoveSecret = (index: number) => {
+    setEnvSecrets(envSecrets.filter((_, i) => i !== index));
+  };
+
+  const handleSecretChange = (index: number, field: "name" | "value", value: string) => {
+    const updated = [...envSecrets];
+    updated[index][field] = value;
+    setEnvSecrets(updated);
   };
 
   if (authLoading || isLoading) {
@@ -171,6 +267,11 @@ export default function TrackEditorPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <GitSync trackSlug={slug} />
+          <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
+            <Settings className="h-4 w-4 mr-1" />
+            Settings
+          </Button>
           <Button variant="outline" size="sm" onClick={handleTogglePublish}>
             {track.is_published ? (
               <>
@@ -186,6 +287,127 @@ export default function TrackEditorPage() {
           </Button>
         </div>
       </div>
+
+      {/* Track Settings Panel */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex">
+          <div
+            className="flex-1 bg-black/50"
+            onClick={() => setShowSettings(false)}
+          />
+          <div className="w-96 bg-background border-l p-6 overflow-y-auto">
+            <h2 className="text-lg font-semibold mb-4">Track Settings</h2>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="trackDescription">Description</Label>
+                <textarea
+                  id="trackDescription"
+                  value={trackDescription}
+                  onChange={(e) => setTrackDescription(e.target.value)}
+                  className="w-full h-24 px-3 py-2 rounded-md border border-input bg-background text-sm"
+                  placeholder="Track description..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="trackTags">Tags (comma-separated)</Label>
+                <Input
+                  id="trackTags"
+                  value={trackTags}
+                  onChange={(e) => setTrackTags(e.target.value)}
+                  placeholder="kubernetes, docker, devops"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter tags separated by commas
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="trackDifficulty">Difficulty</Label>
+                <select
+                  id="trackDifficulty"
+                  value={trackDifficulty}
+                  onChange={(e) => setTrackDifficulty(e.target.value)}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                >
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="trackEstimatedMinutes">Estimated Time (minutes)</Label>
+                <Input
+                  id="trackEstimatedMinutes"
+                  type="number"
+                  min="1"
+                  value={trackEstimatedMinutes}
+                  onChange={(e) => setTrackEstimatedMinutes(e.target.value)}
+                  placeholder="30"
+                />
+              </div>
+
+              {/* Environment Secrets */}
+              <div className="space-y-2 pt-4 border-t">
+                <div className="flex items-center justify-between">
+                  <Label>Environment Secrets</Label>
+                  <Button variant="ghost" size="sm" onClick={handleAddSecret}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  These variables will be available to your scripts at runtime
+                </p>
+                <div className="space-y-2">
+                  {envSecrets.map((secret, index) => (
+                    <div key={index} className="flex gap-2">
+                      <Input
+                        placeholder="VAR_NAME"
+                        value={secret.name}
+                        onChange={(e) => handleSecretChange(index, "name", e.target.value)}
+                        className="flex-1 font-mono text-sm"
+                      />
+                      <Input
+                        placeholder="value"
+                        type="password"
+                        value={secret.value}
+                        onChange={(e) => handleSecretChange(index, "value", e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRemoveSecret(index)}
+                        disabled={envSecrets.length === 1}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowSettings(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={handleSaveTrackSettings}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Saving..." : "Save Settings"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         {/* Step list sidebar */}
@@ -231,86 +453,47 @@ export default function TrackEditorPage() {
         </div>
 
         {/* Step editor */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 flex flex-col overflow-hidden">
           {selectedStep ? (
-            <div className="max-w-4xl mx-auto space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-2 flex-1 mr-4">
-                  <Label htmlFor="stepTitle">Step Title</Label>
+            <div className="flex flex-col h-full">
+              {/* Step title bar */}
+              <div className="flex items-center gap-4 px-4 py-3 border-b bg-muted/30">
+                <div className="flex-1">
                   <Input
                     id="stepTitle"
                     value={stepTitle}
-                    onChange={(e) => setStepTitle(e.target.value)}
+                    onChange={(e) => handleTitleChange(e.target.value)}
                     placeholder="Step title"
+                    className="text-lg font-medium h-9"
                   />
                 </div>
-                <Button onClick={handleSaveStep} disabled={isSaving}>
-                  <Save className="h-4 w-4 mr-1" />
-                  {isSaving ? "Saving..." : "Save Step"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  {hasUnsavedChanges && (
+                    <span className="text-xs text-orange-500">Unsaved changes</span>
+                  )}
+                  <Button onClick={handleSaveStep} disabled={isSaving} size="sm">
+                    <Save className="h-4 w-4 mr-1" />
+                    {isSaving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
               </div>
 
-              <Tabs defaultValue="instructions">
-                <TabsList>
-                  <TabsTrigger value="instructions">Instructions</TabsTrigger>
-                  <TabsTrigger value="setup">Setup Script</TabsTrigger>
-                  <TabsTrigger value="validation">Validation Script</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="instructions" className="mt-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Instructions (Markdown)</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <textarea
-                        value={stepInstructions}
-                        onChange={(e) => setStepInstructions(e.target.value)}
-                        className="w-full h-[400px] px-3 py-2 rounded-md border border-input bg-background text-sm font-mono"
-                        placeholder="# Step Title\n\nWrite your instructions here..."
-                      />
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                <TabsContent value="setup" className="mt-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Setup Script (Bash)</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ScriptEditor
-                        value={setupScript}
-                        onChange={setSetupScript}
-                        height="400px"
-                      />
-                      <p className="text-xs text-muted-foreground mt-2">
-                        This script runs when the learner clicks &quot;Run Setup&quot;.
-                        Environment variables will be injected.
-                      </p>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                <TabsContent value="validation" className="mt-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Validation Script (Bash)</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ScriptEditor
-                        value={validationScript}
-                        onChange={setValidationScript}
-                        height="400px"
-                      />
-                      <p className="text-xs text-muted-foreground mt-2">
-                        This script runs when the learner clicks &quot;Validate&quot;.
-                        Exit code 0 = pass, non-zero = fail.
-                      </p>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
+              {/* IDE */}
+              <div className="flex-1 p-4">
+                <StepIDE
+                  stepTitle={stepTitle}
+                  instructions={stepInstructions}
+                  setupScript={setupScript}
+                  validationScript={validationScript}
+                  onInstructionsChange={handleInstructionsChange}
+                  onSetupScriptChange={handleSetupScriptChange}
+                  onValidationScriptChange={handleValidationScriptChange}
+                  onHintsChange={handleHintsChange}
+                  onSave={handleSaveStep}
+                  isSaving={isSaving}
+                  hasUnsavedChanges={hasUnsavedChanges}
+                />
+              </div>
             </div>
           ) : (
             <div className="h-full flex items-center justify-center text-muted-foreground">

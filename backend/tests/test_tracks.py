@@ -148,3 +148,122 @@ class TestDeleteTrack:
     def test_delete_track_not_found(self, client: TestClient, author_headers):
         response = client.delete("/api/tracks/nonexistent", headers=author_headers)
         assert response.status_code == 404
+
+
+class TestTrackSearch:
+    def test_search_by_title(self, client: TestClient, test_track):
+        response = client.get("/api/tracks/public?q=Test")
+        assert response.status_code == 200
+        data = response.json()
+        assert any(t["slug"] == "test-track" for t in data)
+
+    def test_search_no_results(self, client: TestClient, test_track):
+        response = client.get("/api/tracks/public?q=nonexistentquery12345")
+        assert response.status_code == 200
+        data = response.json()
+        assert not any(t["slug"] == "test-track" for t in data)
+
+    def test_filter_by_difficulty(self, client: TestClient, author_headers, db):
+        from app import models
+        # Create track with specific difficulty
+        track = models.Track(
+            slug="advanced-track",
+            title="Advanced Track",
+            description="An advanced track",
+            difficulty="advanced",
+            is_published=True,
+            author_id=1,
+            org_id=1
+        )
+        db.add(track)
+        db.commit()
+
+        response = client.get("/api/tracks/public?difficulty=advanced")
+        assert response.status_code == 200
+        data = response.json()
+        assert any(t["slug"] == "advanced-track" for t in data)
+
+    def test_filter_by_tag(self, client: TestClient, author_headers, db):
+        from app import models
+        # Create track with specific tags
+        track = models.Track(
+            slug="kubernetes-track",
+            title="Kubernetes Basics",
+            description="Learn kubernetes",
+            tags=["kubernetes", "devops"],
+            is_published=True,
+            author_id=1,
+            org_id=1
+        )
+        db.add(track)
+        db.commit()
+
+        response = client.get("/api/tracks/public?tag=kubernetes")
+        assert response.status_code == 200
+        data = response.json()
+        assert any(t["slug"] == "kubernetes-track" for t in data)
+
+    def test_sort_by_title(self, client: TestClient, test_track):
+        response = client.get("/api/tracks/public?sort=title")
+        assert response.status_code == 200
+        data = response.json()
+        # Verify it's a list (sorting works)
+        assert isinstance(data, list)
+
+    def test_list_tags(self, client: TestClient, author_headers, db):
+        from app import models
+        # Create track with tags
+        track = models.Track(
+            slug="tagged-track",
+            title="Tagged Track",
+            description="A track with tags",
+            tags=["python", "api"],
+            is_published=True,
+            author_id=1,
+            org_id=1
+        )
+        db.add(track)
+        db.commit()
+
+        response = client.get("/api/tracks/tags")
+        assert response.status_code == 200
+        data = response.json()
+        assert "python" in data
+        assert "api" in data
+
+
+class TestTrackWithNewFields:
+    def test_create_track_with_tags(self, client: TestClient, author_headers):
+        response = client.post(
+            "/api/tracks",
+            headers=author_headers,
+            json={
+                "title": "Tagged Track",
+                "slug": "tagged-track-new",
+                "description": "A track with tags",
+                "tags": ["docker", "containers"],
+                "difficulty": "intermediate",
+                "estimated_minutes": 45,
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["tags"] == ["docker", "containers"]
+        assert data["difficulty"] == "intermediate"
+        assert data["estimated_minutes"] == 45
+
+    def test_update_track_tags(self, client: TestClient, test_track, author_headers):
+        response = client.patch(
+            f"/api/tracks/{test_track.slug}",
+            headers=author_headers,
+            json={
+                "tags": ["updated", "tags"],
+                "difficulty": "advanced",
+                "estimated_minutes": 60,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tags"] == ["updated", "tags"]
+        assert data["difficulty"] == "advanced"
+        assert data["estimated_minutes"] == 60

@@ -1,4 +1,6 @@
 import re
+import secrets
+from datetime import datetime, timedelta
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -6,6 +8,11 @@ from .. import models, schemas, auth
 from ..database import get_db
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
+
+
+def generate_invite_code() -> str:
+    """Generate a unique 6-character alphanumeric invite code"""
+    return secrets.token_urlsafe(4)[:6].upper()
 
 
 def slugify(name: str) -> str:
@@ -109,3 +116,111 @@ def get_organization(
             detail="Organization not found"
         )
     return org
+
+
+# Invite code endpoints
+@router.post("/my/invite-codes", response_model=schemas.InviteCode, status_code=status.HTTP_201_CREATED)
+def create_invite_code(
+    data: schemas.InviteCodeCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create an invite code for the current user's organization"""
+    # Generate unique code
+    code = generate_invite_code()
+    while db.query(models.InviteCode).filter(models.InviteCode.code == code).first():
+        code = generate_invite_code()
+
+    # Calculate expiration
+    expires_at = None
+    if data.expires_in_days:
+        expires_at = datetime.utcnow() + timedelta(days=data.expires_in_days)
+
+    invite = models.InviteCode(
+        code=code,
+        org_id=current_user.org_id,
+        created_by_id=current_user.id,
+        max_uses=data.max_uses,
+        expires_at=expires_at
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+
+    return invite
+
+
+@router.get("/my/invite-codes", response_model=List[schemas.InviteCode])
+def list_my_invite_codes(
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List all invite codes for the current user's organization"""
+    codes = db.query(models.InviteCode).filter(
+        models.InviteCode.org_id == current_user.org_id
+    ).order_by(models.InviteCode.created_at.desc()).all()
+    return codes
+
+
+@router.delete("/my/invite-codes/{code}")
+def delete_invite_code(
+    code: str,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete (deactivate) an invite code"""
+    invite = db.query(models.InviteCode).filter(
+        models.InviteCode.code == code,
+        models.InviteCode.org_id == current_user.org_id
+    ).first()
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invite code not found"
+        )
+
+    invite.is_active = False
+    db.commit()
+
+    return {"message": "Invite code deactivated"}
+
+
+@router.get("/invite/{code}", response_model=schemas.InviteCodeValidation)
+def validate_invite_code(
+    code: str,
+    db: Session = Depends(get_db)
+):
+    """Validate an invite code (public endpoint for registration)"""
+    invite = db.query(models.InviteCode).filter(
+        models.InviteCode.code == code.upper()
+    ).first()
+
+    if not invite:
+        return schemas.InviteCodeValidation(
+            valid=False,
+            message="Invalid invite code"
+        )
+
+    if not invite.is_active:
+        return schemas.InviteCodeValidation(
+            valid=False,
+            message="This invite code has been deactivated"
+        )
+
+    if invite.expires_at and invite.expires_at < datetime.utcnow():
+        return schemas.InviteCodeValidation(
+            valid=False,
+            message="This invite code has expired"
+        )
+
+    if invite.max_uses and invite.uses >= invite.max_uses:
+        return schemas.InviteCodeValidation(
+            valid=False,
+            message="This invite code has reached its maximum uses"
+        )
+
+    return schemas.InviteCodeValidation(
+        valid=True,
+        organization=invite.organization,
+        message="Valid invite code"
+    )

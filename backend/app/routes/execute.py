@@ -75,10 +75,10 @@ def execute_script(
     db.commit()
     db.refresh(execution)
 
-    # Run the script
+    # Run the script with track's environment secrets
     result = runner.run_script(
         script=script or "",
-        environment=enrollment.environment or {},
+        environment=track.env_secrets or {},
         docker_image=track.docker_image
     )
 
