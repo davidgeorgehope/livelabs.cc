@@ -50,9 +50,10 @@ def create_enrollment(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    # Find track by slug
+    # Find track by slug - scoped to user's organization
     track = db.query(models.Track).filter(
-        models.Track.slug == enrollment_data.track_slug
+        models.Track.slug == enrollment_data.track_slug,
+        models.Track.org_id == current_user.org_id
     ).first()
 
     if not track:
@@ -61,8 +62,8 @@ def create_enrollment(
             detail="Track not found"
         )
 
-    # Check if track is published or user is in same org
-    if not track.is_published and track.org_id != current_user.org_id:
+    # Track must be published for enrollment (unless author)
+    if not track.is_published and track.author_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Track not available"

@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export default function TrackPreviewPage() {
   const params = useParams();
   const router = useRouter();
-  const { user, token } = useAuth();
+  const { token, isLoading: authLoading } = useAuth();
   const [track, setTrack] = useState<TrackWithSteps | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,15 +19,25 @@ export default function TrackPreviewPage() {
   const slug = params.slug as string;
 
   useEffect(() => {
+    // Wait for auth to complete
+    if (authLoading) return;
+
+    // Redirect to login if not authenticated
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+
+    // Fetch track (now requires auth)
     tracks
-      .get(slug, token || undefined)
+      .get(slug, token)
       .then(setTrack)
       .catch((err) => setError(err.message))
       .finally(() => setIsLoading(false));
-  }, [slug, token]);
+  }, [slug, token, authLoading, router]);
 
   const handleStartClick = async () => {
-    if (!user || !token) {
+    if (!token) {
       router.push("/login");
       return;
     }
@@ -42,7 +52,8 @@ export default function TrackPreviewPage() {
     }
   };
 
-  if (isLoading) {
+  // Show loading while checking auth
+  if (authLoading || isLoading) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-3xl mx-auto">
@@ -69,13 +80,37 @@ export default function TrackPreviewPage() {
         <p className="text-muted-foreground mb-6">{track.description}</p>
 
         <div className="flex items-center gap-4 mb-8">
+          {track.difficulty && (
+            <span className={`text-sm px-2 py-1 rounded ${
+              track.difficulty === "beginner" ? "bg-green-100 text-green-800" :
+              track.difficulty === "intermediate" ? "bg-yellow-100 text-yellow-800" :
+              "bg-red-100 text-red-800"
+            }`}>
+              {track.difficulty.charAt(0).toUpperCase() + track.difficulty.slice(1)}
+            </span>
+          )}
           <span className="text-sm text-muted-foreground">
             {track.steps.length} steps
           </span>
+          {track.estimated_minutes && (
+            <span className="text-sm text-muted-foreground">
+              ~{track.estimated_minutes} min
+            </span>
+          )}
           <span className="text-sm text-muted-foreground">
             By {track.author?.name || "Unknown"}
           </span>
         </div>
+
+        {track.tags && track.tags.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-6">
+            {track.tags.map((tag) => (
+              <span key={tag} className="text-xs bg-muted px-2 py-1 rounded">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
 
         <Card className="mb-8">
           <CardHeader>
@@ -96,7 +131,7 @@ export default function TrackPreviewPage() {
         </Card>
 
         <Button size="lg" onClick={handleStartClick} disabled={isEnrolling}>
-          {!user ? "Login to Start" : isEnrolling ? "Starting..." : "Start Track"}
+          {isEnrolling ? "Starting..." : "Start Track"}
         </Button>
       </div>
     </div>

@@ -263,7 +263,8 @@ export interface TrackSearchParams {
 }
 
 export const tracks = {
-  listPublic: (params?: TrackSearchParams) => {
+  // List tracks in user's organization (requires auth)
+  list: (params: TrackSearchParams | undefined, token: string) => {
     const searchParams = new URLSearchParams();
     if (params?.q) searchParams.set("q", params.q);
     if (params?.tag) searchParams.set("tag", params.tag);
@@ -272,15 +273,17 @@ export const tracks = {
     if (params?.page) searchParams.set("page", params.page.toString());
     if (params?.page_size) searchParams.set("page_size", params.page_size.toString());
     const query = searchParams.toString();
-    return fetchAPI<PaginatedResponse<Track>>(`/tracks/public${query ? `?${query}` : ""}`);
+    return fetchAPI<PaginatedResponse<Track>>(`/tracks${query ? `?${query}` : ""}`, { token });
   },
 
-  listTags: () => fetchAPI<string[]>("/tracks/tags"),
+  // List tags from user's organization (requires auth)
+  listTags: (token: string) => fetchAPI<string[]>("/tracks/tags", { token }),
 
   listMy: (token: string) =>
     fetchAPI<TrackWithSecrets[]>("/tracks/my", { token }),
 
-  get: (slug: string, token?: string) =>
+  // Get track details (requires auth, scoped to user's org)
+  get: (slug: string, token: string) =>
     fetchAPI<TrackWithSteps>(`/tracks/${slug}`, { token }),
 
   getForEditing: (slug: string, token: string) =>

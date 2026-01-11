@@ -2,12 +2,35 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { tracks, Track, TrackSearchParams } from "@/lib/api";
+import { useAuth } from "@/components/AuthProvider";
+import { MarketingLanding } from "@/components/MarketingLanding";
 import { TrackCard } from "@/components/TrackCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export default function HomePage() {
+  const { user, token, isLoading: authLoading } = useAuth();
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  // Not logged in = marketing page
+  if (!user || !token) {
+    return <MarketingLanding />;
+  }
+
+  // Logged in = track catalog
+  return <TrackCatalog token={token} />;
+}
+
+function TrackCatalog({ token }: { token: string }) {
   const [trackList, setTrackList] = useState<Track[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -36,8 +59,8 @@ export default function HomePage() {
 
     try {
       const [trackData, tagsData] = await Promise.all([
-        tracks.listPublic(params),
-        tracks.listTags()
+        tracks.list(params, token),
+        tracks.listTags(token)
       ]);
       setTrackList(trackData.items);
       setTotalPages(trackData.pages);
@@ -48,7 +71,7 @@ export default function HomePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [searchQuery, selectedTag, selectedDifficulty, sortBy, currentPage]);
+  }, [searchQuery, selectedTag, selectedDifficulty, sortBy, currentPage, token]);
 
   useEffect(() => {
     loadTracks();
@@ -77,10 +100,9 @@ export default function HomePage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-3xl mx-auto text-center mb-8">
-        <h1 className="text-4xl font-bold mb-4">Learn by Doing</h1>
+        <h1 className="text-4xl font-bold mb-4">Your Learning Tracks</h1>
         <p className="text-lg text-muted-foreground">
-          Hands-on guided labs on real SaaS products. No simulations, no VMs - work directly
-          with production APIs and see real results.
+          Hands-on guided labs with real terminal environments. Choose a track and start learning.
         </p>
       </div>
 

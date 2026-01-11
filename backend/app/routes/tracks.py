@@ -8,17 +8,10 @@ from ..database import get_db
 router = APIRouter(prefix="/tracks", tags=["tracks"])
 
 
-@router.get("", response_model=list[schemas.Track])
-def list_tracks(db: Session = Depends(get_db)):
-    """List all published tracks"""
-    return db.query(models.Track).filter(
-        models.Track.is_published == True
-    ).order_by(models.Track.created_at.desc()).all()
-
-
-@router.get("/public", response_model=schemas.PaginatedResponse[schemas.Track])
-def list_public_tracks(
+@router.get("", response_model=schemas.PaginatedResponse[schemas.Track])
+def list_tracks(
     db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
     q: Optional[str] = Query(None, description="Search query for title/description"),
     tag: Optional[str] = Query(None, description="Filter by tag"),
     difficulty: Optional[str] = Query(None, description="Filter by difficulty"),
@@ -26,8 +19,11 @@ def list_public_tracks(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page")
 ):
-    """List all published tracks with optional search, filters, and pagination"""
-    query = db.query(models.Track).filter(models.Track.is_published == True)
+    """List published tracks in user's organization with optional search, filters, and pagination"""
+    query = db.query(models.Track).filter(
+        models.Track.org_id == current_user.org_id,
+        models.Track.is_published == True
+    )
 
     # Text search on title and description
     if q:
@@ -74,9 +70,13 @@ def list_public_tracks(
 
 
 @router.get("/tags", response_model=list[str])
-def list_all_tags(db: Session = Depends(get_db)):
-    """Get all unique tags from published tracks"""
+def list_all_tags(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    """Get all unique tags from published tracks in user's organization"""
     tracks = db.query(models.Track).filter(
+        models.Track.org_id == current_user.org_id,
         models.Track.is_published == True
     ).all()
 
@@ -139,12 +139,17 @@ def create_track(
 @router.get("/{slug}", response_model=schemas.TrackWithSteps)
 def get_track(
     slug: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
 ):
+    """Get track details - scoped to user's organization"""
     track = db.query(models.Track).options(
         joinedload(models.Track.steps),
         joinedload(models.Track.author)
-    ).filter(models.Track.slug == slug).first()
+    ).filter(
+        models.Track.slug == slug,
+        models.Track.org_id == current_user.org_id
+    ).first()
 
     if not track:
         raise HTTPException(
