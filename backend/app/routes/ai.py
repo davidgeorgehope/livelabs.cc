@@ -81,6 +81,20 @@ class GenerateHintsResponse(BaseModel):
     hints: list[str]
 
 
+class GenerateInitScriptRequest(BaseModel):
+    track_title: str
+    track_description: Optional[str] = None
+    app_type: Optional[str] = None  # "saas_sandbox", "docker_app", "external_url"
+    env_secret_names: Optional[list[str]] = None  # Names of available secrets
+    example_url: Optional[str] = None  # Example URL format
+    additional_context: Optional[str] = None
+
+
+class GenerateInitScriptResponse(BaseModel):
+    init_script: str
+    notes: list[str] = []
+
+
 # Learner endpoints
 @router.post("/help", response_model=HelpResponse)
 def get_help(
@@ -402,6 +416,124 @@ Format as a numbered list."""
                     hints.append(hint_text)
 
         return GenerateHintsResponse(hints=hints[:4])
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"AI service error: {str(e)}"
+        )
+
+
+@router.post("/generate-init-script", response_model=GenerateInitScriptResponse)
+def generate_init_script(
+    request: GenerateInitScriptRequest,
+    current_user: models.User = Depends(auth.get_current_author)
+):
+    """Generate an initialization script for provisioning lab environments"""
+    try:
+        ai_client = get_client()
+    except HTTPException:
+        raise
+
+    system_prompt = """You are a DevOps script writing assistant for technical learning platforms.
+Generate bash initialization scripts that provision sandbox environments for learners.
+
+CRITICAL: The script must output valid JSON to stdout with this exact format:
+{"url": "https://...", "cookies": [{"name": "...", "value": "..."}]}
+
+Requirements:
+- Start with #!/bin/bash
+- Use environment variables for secrets (e.g., $API_KEY, $API_SECRET)
+- Include error handling with helpful stderr messages
+- Echo only the final JSON to stdout
+- Exit 0 on success, non-zero on failure
+- Keep it simple and well-commented"""
+
+    # Build context about what kind of script is needed
+    user_content = f"""Create an initialization script for a track titled "{request.track_title}".
+"""
+
+    if request.track_description:
+        user_content += f"\nTrack description: {request.track_description}\n"
+
+    if request.app_type:
+        app_type_descriptions = {
+            "saas_sandbox": "Provision a sandbox environment via API (create account, get credentials)",
+            "docker_app": "Wait for a Docker container to be ready and return its URL",
+            "external_url": "Return a static or dynamically-constructed external URL",
+        }
+        user_content += f"\nApp type: {app_type_descriptions.get(request.app_type, request.app_type)}\n"
+
+    if request.env_secret_names:
+        user_content += f"\nAvailable environment secrets: {', '.join(request.env_secret_names)}\n"
+        user_content += "(These are available as environment variables, e.g., $SECRET_NAME)\n"
+
+    if request.example_url:
+        user_content += f"\nExample/target URL format: {request.example_url}\n"
+
+    if request.additional_context:
+        user_content += f"\nAdditional context: {request.additional_context}\n"
+
+    user_content += """
+
+Generate:
+1. A bash script that provisions the environment and outputs JSON
+2. 2-3 important notes about the script (e.g., what secrets are required, any assumptions)
+
+Return the script in a ```bash code block and notes as a numbered list after the script."""
+
+    try:
+        message = ai_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}]
+        )
+
+        response_text = message.content[0].text
+
+        # Extract script from code block
+        script = ""
+        in_code_block = False
+        script_lines = []
+        for line in response_text.split('\n'):
+            if line.strip().startswith('```bash') or line.strip().startswith('```shell') or line.strip() == '```sh':
+                in_code_block = True
+                continue
+            elif line.strip() == '```' and in_code_block:
+                in_code_block = False
+                continue
+            elif in_code_block:
+                script_lines.append(line)
+
+        script = '\n'.join(script_lines)
+
+        # Extract notes from numbered list (after code block)
+        notes = []
+        after_code_block = False
+        for line in response_text.split('\n'):
+            if line.strip() == '```' and in_code_block:
+                after_code_block = True
+            if after_code_block:
+                line = line.strip()
+                if line and (line[0].isdigit() and '.' in line[:3]):
+                    note_text = line.split('.', 1)[1].strip() if '.' in line else line
+                    if len(note_text) > 5:
+                        notes.append(note_text)
+
+        # Fallback script if parsing failed
+        if not script.strip():
+            script = '''#!/bin/bash
+# TODO: Customize this initialization script
+
+# Example: Output a simple URL
+echo '{"url": "https://example.com", "cookies": []}'
+'''
+
+        return GenerateInitScriptResponse(
+            init_script=script,
+            notes=notes[:5]
+        )
 
     except Exception as e:
         raise HTTPException(

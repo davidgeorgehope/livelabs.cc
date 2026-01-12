@@ -4,7 +4,7 @@ load_dotenv()  # Load .env file before other imports that use env vars
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import engine, Base
-from .routes import auth, tracks, steps, enrollments, execute, organizations, achievements, ai, github, analytics, admin, infrastructure, terminal
+from .routes import auth, tracks, steps, enrollments, execute, organizations, achievements, ai, github, analytics, admin, infrastructure, terminal, app_container
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -45,6 +45,7 @@ app.include_router(analytics.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(infrastructure.router, prefix="/api")
 app.include_router(terminal.router, prefix="/api")
+app.include_router(app_container.router, prefix="/api")
 
 
 @app.get("/")

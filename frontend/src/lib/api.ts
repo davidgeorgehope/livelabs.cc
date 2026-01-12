@@ -202,6 +202,20 @@ export interface Track {
   difficulty: string;
   estimated_minutes: number | null;
   created_at: string;
+  // App configuration
+  app_url_template: string | null;
+  app_container_image: string | null;
+  app_container_ports: { container: number; host: number | null }[];
+  app_container_command: string | null;
+  app_container_lifecycle: "enrollment" | "step";
+  app_container_env: Record<string, string>;
+  auto_run_setup: boolean;
+  auto_login_type: "none" | "url_params" | "cookies";
+  auto_login_config: {
+    params?: Record<string, string>;
+    cookies?: { name: string; value: string; domain?: string }[];
+  };
+  init_script: string | null;
 }
 
 export interface Step {
@@ -251,6 +265,20 @@ export interface TrackUpdate {
   tags?: string[];
   difficulty?: string;
   estimated_minutes?: number;
+  // App configuration
+  app_url_template?: string | null;
+  app_container_image?: string | null;
+  app_container_ports?: { container: number; host: number | null }[];
+  app_container_command?: string | null;
+  app_container_lifecycle?: "enrollment" | "step";
+  app_container_env?: Record<string, string>;
+  auto_run_setup?: boolean;
+  auto_login_type?: "none" | "url_params" | "cookies";
+  auto_login_config?: {
+    params?: Record<string, string>;
+    cookies?: { name: string; value: string; domain?: string }[];
+  };
+  init_script?: string | null;
 }
 
 export interface TrackSearchParams {
@@ -415,6 +443,17 @@ export interface ExecutionResult {
   advanced: boolean;
 }
 
+export interface AutoSetupResult {
+  skipped: boolean;
+  reason?: string;
+  success: boolean;
+  cached?: boolean;
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number;
+  duration_ms?: number;
+}
+
 export const execution = {
   run: (
     enrollmentId: number,
@@ -430,6 +469,72 @@ export const execution = {
         token,
       }
     ),
+
+  autoSetup: (
+    enrollmentId: number,
+    stepOrder: number,
+    token: string
+  ) =>
+    fetchAPI<AutoSetupResult>(
+      `/enrollments/${enrollmentId}/steps/${stepOrder}/execute/auto-setup`,
+      {
+        method: "POST",
+        token,
+      }
+    ),
+};
+
+// App Container
+export interface AppContainerStatus {
+  status: "no_app" | "needs_init" | "initializing" | "init_failed" | "ready" | "external" | "stopped" | "starting" | "running" | "failed" | "error";
+  has_app: boolean;
+  type?: "external" | "container";
+  url?: string;
+  cookies?: { name: string; value: string; domain?: string }[];
+  ports?: Record<string, number>;
+  can_start?: boolean;
+  can_restart?: boolean;
+  restart_count?: number;
+  started_at?: string;
+  message?: string;
+  error?: string;
+}
+
+export interface InitResult {
+  status: "success" | "failed" | "running";
+  url?: string;
+  cookies?: { name: string; value: string; domain?: string }[];
+  error?: string;
+  message?: string;
+}
+
+export const appContainer = {
+  getStatus: (enrollmentId: number, token: string) =>
+    fetchAPI<AppContainerStatus>(`/enrollments/${enrollmentId}/app`, { token }),
+
+  init: (enrollmentId: number, token: string) =>
+    fetchAPI<InitResult>(`/enrollments/${enrollmentId}/app/init`, {
+      method: "POST",
+      token,
+    }),
+
+  start: (enrollmentId: number, token: string) =>
+    fetchAPI<AppContainerStatus>(`/enrollments/${enrollmentId}/app/start`, {
+      method: "POST",
+      token,
+    }),
+
+  restart: (enrollmentId: number, token: string) =>
+    fetchAPI<AppContainerStatus>(`/enrollments/${enrollmentId}/app/restart`, {
+      method: "POST",
+      token,
+    }),
+
+  stop: (enrollmentId: number, token: string) =>
+    fetchAPI<{ status: string; message: string }>(`/enrollments/${enrollmentId}/app/stop`, {
+      method: "POST",
+      token,
+    }),
 };
 
 // Achievements
@@ -529,6 +634,20 @@ export interface GenerateHintsResponse {
   hints: string[];
 }
 
+export interface GenerateInitScriptRequest {
+  track_title: string;
+  track_description?: string;
+  app_type?: string;  // "saas_sandbox", "docker_app", "external_url"
+  env_secret_names?: string[];
+  example_url?: string;
+  additional_context?: string;
+}
+
+export interface GenerateInitScriptResponse {
+  init_script: string;
+  notes: string[];
+}
+
 export const ai = {
   getHelp: (data: HelpRequest, token: string) =>
     fetchAPI<HelpResponse>("/ai/help", {
@@ -560,6 +679,13 @@ export const ai = {
 
   generateHints: (data: GenerateHintsRequest, token: string) =>
     fetchAPI<GenerateHintsResponse>("/ai/generate-hints", {
+      method: "POST",
+      body: JSON.stringify(data),
+      token,
+    }),
+
+  generateInitScript: (data: GenerateInitScriptRequest, token: string) =>
+    fetchAPI<GenerateInitScriptResponse>("/ai/generate-init-script", {
       method: "POST",
       body: JSON.stringify(data),
       token,

@@ -52,6 +52,25 @@ class Track(Base):
     estimated_minutes = Column(Integer, nullable=True)  # Estimated completion time
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # App Display Configuration
+    app_url_template = Column(String(500), nullable=True)  # e.g., "https://staging.example.com" or "http://localhost:{port}"
+    app_container_image = Column(String(255), nullable=True)  # Docker image for background app
+    app_container_ports = Column(JSON, default=list)  # e.g., [{"container": 8080, "host": null}] - null = dynamic
+    app_container_command = Column(String(500), nullable=True)  # Override CMD
+    app_container_lifecycle = Column(String(20), default="enrollment")  # "enrollment" | "step"
+    app_container_env = Column(JSON, default=dict)  # Additional env vars for app container
+
+    # Auto-run Configuration
+    auto_run_setup = Column(Boolean, default=True)  # Auto-run setup script on step entry
+
+    # Auto-login Configuration
+    auto_login_type = Column(String(20), default="none")  # "none" | "url_params" | "cookies"
+    auto_login_config = Column(JSON, default=dict)  # {params: {}, cookies: []}
+
+    # Lab Initialization Script - runs once when learner opens the lab
+    # Output JSON: {"url": "...", "cookies": [...]}
+    init_script = Column(Text, default="")
+
     author = relationship("User", back_populates="tracks")
     organization = relationship("Organization", back_populates="tracks")
     steps = relationship("Step", back_populates="track", order_by="Step.order", cascade="all, delete-orphan")
@@ -84,6 +103,13 @@ class Enrollment(Base):
     environment = Column(JSON, default=dict)  # User's env vars (API keys, etc.)
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+
+    # Lab initialization state - cached URL and cookies from init script
+    app_url = Column(String(500), nullable=True)  # Cached URL from init script
+    app_cookies = Column(JSON, default=list)  # Cached cookies from init script
+    init_status = Column(String(20), default="pending")  # pending, running, success, failed
+    init_error = Column(Text, nullable=True)  # Error message if init failed
+    init_completed_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="enrollments")
     track = relationship("Track", back_populates="enrollments")
@@ -181,3 +207,19 @@ class TrackGitSync(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     track = relationship("Track", backref="git_sync")
+
+
+class AppContainer(Base):
+    """Tracks running Docker containers for lab apps"""
+    __tablename__ = "app_containers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    enrollment_id = Column(Integer, ForeignKey("enrollments.id"), nullable=False)
+    container_id = Column(String(64), nullable=False)  # Docker container ID
+    status = Column(String(20), default="starting")  # starting, running, stopped, failed
+    ports = Column(JSON, default=dict)  # {container_port: host_port} mapping
+    started_at = Column(DateTime, default=datetime.utcnow)
+    last_health_check = Column(DateTime, nullable=True)
+    restart_count = Column(Integer, default=0)
+
+    enrollment = relationship("Enrollment", backref="app_container")

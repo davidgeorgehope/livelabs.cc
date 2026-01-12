@@ -117,6 +117,116 @@ def execute_script(
     )
 
 
+@router.post("/auto-setup")
+def auto_setup(
+    enrollment_id: int,
+    step_order: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    """
+    Auto-run setup script on step entry.
+    - Only runs if track.auto_run_setup is true
+    - Returns cached result if setup already run successfully for this step
+    - Called by frontend when entering a step
+    """
+    # Get enrollment
+    enrollment = db.query(models.Enrollment).filter(
+        models.Enrollment.id == enrollment_id,
+        models.Enrollment.user_id == current_user.id
+    ).first()
+
+    if not enrollment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Enrollment not found"
+        )
+
+    # Get track
+    track = db.query(models.Track).filter(
+        models.Track.id == enrollment.track_id
+    ).first()
+
+    # Check if auto_run_setup is enabled
+    if not track.auto_run_setup:
+        return {
+            "skipped": True,
+            "reason": "auto_run_setup is disabled for this track",
+            "success": True
+        }
+
+    # Get step
+    step = db.query(models.Step).filter(
+        models.Step.track_id == track.id,
+        models.Step.order == step_order
+    ).first()
+
+    if not step:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Step not found"
+        )
+
+    # Check if setup script exists
+    if not step.setup_script or not step.setup_script.strip():
+        return {
+            "skipped": True,
+            "reason": "No setup script for this step",
+            "success": True
+        }
+
+    # Check if setup already run successfully
+    existing = db.query(models.Execution).filter(
+        models.Execution.enrollment_id == enrollment.id,
+        models.Execution.step_id == step.id,
+        models.Execution.script_type == "setup",
+        models.Execution.status == "success"
+    ).first()
+
+    if existing:
+        return {
+            "skipped": True,
+            "reason": "Setup already completed",
+            "success": True,
+            "cached": True,
+            "stdout": existing.stdout,
+            "stderr": existing.stderr
+        }
+
+    # Run the setup script
+    execution = models.Execution(
+        enrollment_id=enrollment.id,
+        step_id=step.id,
+        script_type="setup",
+        status="running"
+    )
+    db.add(execution)
+    db.commit()
+    db.refresh(execution)
+
+    result = runner.run_script(
+        script=step.setup_script,
+        environment=track.env_secrets or {},
+        docker_image=track.docker_image
+    )
+
+    execution.status = "success" if result["success"] else "failed"
+    execution.stdout = result["stdout"]
+    execution.stderr = result["stderr"]
+    execution.exit_code = result["exit_code"]
+    execution.duration_ms = result["duration_ms"]
+    db.commit()
+
+    return {
+        "skipped": False,
+        "success": result["success"],
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+        "exit_code": result["exit_code"],
+        "duration_ms": result["duration_ms"]
+    }
+
+
 @router.get("/history", response_model=list[schemas.Execution])
 def get_execution_history(
     enrollment_id: int,

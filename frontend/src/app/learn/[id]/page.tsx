@@ -1,19 +1,37 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { enrollments, execution, EnrollmentDetail, ExecutionResult } from "@/lib/api";
+import {
+  enrollments,
+  execution,
+  EnrollmentDetail,
+  ExecutionResult,
+  AppContainerStatus,
+} from "@/lib/api";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { ProgressiveHints } from "@/components/ProgressiveHints";
+import { AIHelper } from "@/components/AIHelper";
+import { CodeExplainer } from "@/components/CodeExplainer";
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { StepList } from "@/components/StepList";
-import { MarkdownRenderer } from "@/components/MarkdownRenderer";
-import { TerminalOutput } from "@/components/TerminalOutput";
-import { ProgressiveHints } from "@/components/ProgressiveHints";
-import { ResizablePane } from "@/components/ResizablePane";
-import { AIHelper } from "@/components/AIHelper";
-import { CodeExplainer } from "@/components/CodeExplainer";
-import { InteractiveTerminal } from "@/components/InteractiveTerminal";
-import { Play, CheckCircle, ChevronLeft, ChevronRight, Maximize2, Minimize2, X, Terminal } from "lucide-react";
+import { AppWindow } from "@/components/AppWindow";
+import { InstructionsSidebar } from "@/components/InstructionsSidebar";
+import { TerminalDrawer } from "@/components/TerminalDrawer";
+import {
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle,
+  Menu,
+  X,
+  Loader2,
+} from "lucide-react";
+
+type SetupStatus = {
+  status: "idle" | "running" | "success" | "failed";
+  message?: string;
+};
 
 export default function TrackPlayerPage() {
   const params = useParams();
@@ -25,9 +43,12 @@ export default function TrackPlayerPage() {
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [lastResult, setLastResult] = useState<ExecutionResult | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [terminalMode, setTerminalMode] = useState<"batch" | "interactive">("batch");
+  const [stepListOpen, setStepListOpen] = useState(false);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus>({ status: "idle" });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [appStatus, setAppStatus] = useState<AppContainerStatus | null>(null);
+  const autoSetupRan = useRef<Set<number>>(new Set());
 
   const enrollmentId = parseInt(params.id as string);
 
@@ -52,6 +73,49 @@ export default function TrackPlayerPage() {
     }
     loadEnrollment();
   }, [token, authLoading, router, loadEnrollment]);
+
+  // Auto-run setup script when entering a step
+  useEffect(() => {
+    const runAutoSetup = async () => {
+      if (!token || !enrollment) return;
+      if (autoSetupRan.current.has(selectedStep)) return;
+
+      const track = enrollment.track;
+      const step = track.steps.find((s) => s.order === selectedStep);
+
+      if (!step?.setup_script || !track.auto_run_setup) return;
+      if (selectedStep > enrollment.current_step) return;
+
+      autoSetupRan.current.add(selectedStep);
+      setSetupStatus({ status: "running" });
+
+      try {
+        const result = await execution.autoSetup(enrollmentId, selectedStep, token);
+        if (result.skipped) {
+          setSetupStatus({ status: "success", message: result.reason });
+        } else if (result.success) {
+          setSetupStatus({ status: "success" });
+        } else {
+          setSetupStatus({ status: "failed", message: result.stderr });
+          setLastResult({
+            success: false,
+            stdout: result.stdout || "",
+            stderr: result.stderr || "",
+            exit_code: result.exit_code || 1,
+            duration_ms: result.duration_ms || 0,
+            advanced: false,
+          });
+        }
+      } catch (err) {
+        setSetupStatus({
+          status: "failed",
+          message: err instanceof Error ? err.message : "Setup failed",
+        });
+      }
+    };
+
+    runAutoSetup();
+  }, [selectedStep, enrollment, enrollmentId, token]);
 
   const runScript = async (scriptType: "setup" | "validation") => {
     if (!token || !enrollment) return;
@@ -80,10 +144,20 @@ export default function TrackPlayerPage() {
     }
   };
 
+  const handleStepChange = (step: number) => {
+    setSelectedStep(step);
+    setLastResult(null);
+    setSetupStatus({ status: "idle" });
+    setStepListOpen(false);
+  };
+
   if (authLoading || isLoading) {
     return (
       <div className="h-[calc(100vh-3.5rem)] flex items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <span>Loading lab...</span>
+        </div>
       </div>
     );
   }
@@ -91,235 +165,225 @@ export default function TrackPlayerPage() {
   if (error || !enrollment) {
     return (
       <div className="h-[calc(100vh-3.5rem)] flex items-center justify-center">
-        <div className="text-red-500">{error || "Enrollment not found"}</div>
+        <div className="text-center">
+          <div className="text-red-500 mb-4">{error || "Enrollment not found"}</div>
+          <Button variant="outline" onClick={() => router.push("/learn")}>
+            Back to Learning
+          </Button>
+        </div>
       </div>
     );
   }
 
   const currentStepData = enrollment.track.steps.find((s) => s.order === selectedStep);
   const isCompleted = enrollment.completed_at !== null;
-  const canRunSetup = selectedStep <= enrollment.current_step && currentStepData?.setup_script;
-  const canValidate = selectedStep <= enrollment.current_step && currentStepData?.validation_script;
+  const canRunSetup = selectedStep <= enrollment.current_step && !!currentStepData?.setup_script;
+  const canValidate = selectedStep <= enrollment.current_step && !!currentStepData?.validation_script;
+  const hasApp = enrollment.track.app_url_template || enrollment.track.app_container_image;
 
-  // Get last error from failed validation
-  const lastError = lastResult && !lastResult.success && lastResult.stderr
-    ? lastResult.stderr
-    : null;
+  const lastError =
+    lastResult && !lastResult.success && lastResult.stderr ? lastResult.stderr : null;
 
-  // Instructions content
-  const instructionsContent = (
-    <div className="h-full overflow-y-auto p-6">
-      {currentStepData ? (
-        <>
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <h1 className="text-2xl font-bold">{currentStepData.title}</h1>
-            <div className="flex items-center gap-2">
-              <AIHelper
-                stepTitle={currentStepData.title}
-                stepInstructions={currentStepData.instructions_md || ""}
-                lastError={lastError}
-              />
-              <CodeExplainer context={currentStepData.title} />
-              <span className="text-sm text-muted-foreground">
-                Step {selectedStep} of {enrollment.track.steps.length}
-              </span>
-            </div>
-          </div>
-
-          <MarkdownRenderer content={currentStepData.instructions_md || "No instructions provided."} />
-
-          {currentStepData.hints && currentStepData.hints.length > 0 && (
-            <div className="mt-6">
-              <ProgressiveHints hints={currentStepData.hints} />
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="text-muted-foreground">Select a step to view instructions.</div>
-      )}
-    </div>
+  // Progress percentage
+  const progress = Math.round(
+    ((enrollment.current_step - 1) / enrollment.track.steps.length) * 100
   );
-
-  // Terminal content
-  const terminalContent = (
-    <div className="h-full flex flex-col bg-[#1e1e1e]">
-      {/* Terminal header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-[#3c3c3c]">
-        <div className="flex items-center gap-2">
-          {/* Mode toggle */}
-          <div className="flex items-center bg-[#1e1e1e] rounded-md p-0.5">
-            <Button
-              size="sm"
-              variant={terminalMode === "batch" ? "secondary" : "ghost"}
-              onClick={() => setTerminalMode("batch")}
-              className="h-6 text-xs px-2"
-            >
-              <Play className="h-3 w-3 mr-1" />
-              Scripts
-            </Button>
-            <Button
-              size="sm"
-              variant={terminalMode === "interactive" ? "secondary" : "ghost"}
-              onClick={() => setTerminalMode("interactive")}
-              className="h-6 text-xs px-2"
-            >
-              <Terminal className="h-3 w-3 mr-1" />
-              Shell
-            </Button>
-          </div>
-
-          {terminalMode === "batch" && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => runScript("setup")}
-                disabled={isRunning || !canRunSetup}
-                className="h-7 text-xs"
-              >
-                <Play className="h-3 w-3 mr-1" />
-                Setup
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => runScript("validation")}
-                disabled={isRunning || !canValidate}
-                className="h-7 text-xs"
-              >
-                <CheckCircle className="h-3 w-3 mr-1" />
-                Validate
-              </Button>
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setSelectedStep(Math.max(1, selectedStep - 1))}
-            disabled={selectedStep <= 1}
-            className="h-7 w-7 p-0 text-gray-400 hover:text-white"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setSelectedStep(Math.min(enrollment.track.steps.length, selectedStep + 1))}
-            disabled={selectedStep >= enrollment.current_step || selectedStep >= enrollment.track.steps.length}
-            className="h-7 w-7 p-0 text-gray-400 hover:text-white"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="h-7 w-7 p-0 text-gray-400 hover:text-white"
-          >
-            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </Button>
-        </div>
-      </div>
-
-      {/* Terminal output */}
-      <div className="flex-1 overflow-auto">
-        {terminalMode === "batch" ? (
-          <div className="p-4">
-            <TerminalOutput
-              stdout={lastResult?.stdout || ""}
-              stderr={lastResult?.stderr || ""}
-              exitCode={lastResult?.exit_code}
-              isRunning={isRunning}
-            />
-          </div>
-        ) : (
-          token && <InteractiveTerminal enrollmentId={enrollmentId} token={token} />
-        )}
-      </div>
-
-      {/* Success message */}
-      {terminalMode === "batch" && lastResult?.advanced && (
-        <div className="px-4 py-2 bg-green-600 text-white text-sm">
-          {enrollment.current_step < enrollment.track.steps.length
-            ? "Validation passed! Moving to next step..."
-            : "Congratulations! You've completed the track!"}
-        </div>
-      )}
-    </div>
-  );
-
-  // Fullscreen terminal mode
-  if (isFullscreen) {
-    return (
-      <div className="fixed inset-0 z-50 bg-[#1e1e1e]">
-        <div className="h-full flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-[#3c3c3c]">
-            <div className="flex items-center gap-4">
-              <span className="text-white font-medium">{enrollment.track.title}</span>
-              <span className="text-gray-400 text-sm">Step {selectedStep}: {currentStepData?.title}</span>
-            </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setIsFullscreen(false)}
-              className="text-gray-400 hover:text-white"
-            >
-              <X className="h-4 w-4 mr-1" />
-              Exit Fullscreen
-            </Button>
-          </div>
-          <div className="flex-1">
-            {terminalContent}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] flex">
-      {/* Sidebar */}
-      <div className={`${sidebarCollapsed ? "w-0" : "w-72"} transition-all duration-200 border-r bg-muted/30 overflow-hidden`}>
-        <div className="w-72 h-full p-4 overflow-y-auto">
-          <div className="mb-4">
-            <h2 className="font-semibold">{enrollment.track.title}</h2>
+    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-background">
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30">
+        <div className="flex items-center gap-3">
+          {/* Step list toggle (mobile) */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setStepListOpen(!stepListOpen)}
+            className="lg:hidden h-8 w-8 p-0"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+
+          <div className="flex items-center gap-2">
+            <h1 className="font-semibold text-sm lg:text-base truncate max-w-[200px] lg:max-w-none">
+              {enrollment.track.title}
+            </h1>
             {isCompleted && (
-              <span className="text-sm text-green-600 flex items-center gap-1 mt-1">
-                <CheckCircle className="h-4 w-4" /> Completed
+              <span className="text-xs text-green-600 flex items-center gap-1">
+                <CheckCircle className="h-3 w-3" />
+                <span className="hidden sm:inline">Completed</span>
               </span>
             )}
           </div>
-          <StepList
-            steps={enrollment.track.steps}
-            currentStep={enrollment.current_step}
-            selectedStep={selectedStep}
-            onSelectStep={setSelectedStep}
-            estimatedMinutes={enrollment.track.estimated_minutes}
-          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Progress */}
+          <div className="hidden sm:flex items-center gap-2">
+            <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {enrollment.current_step}/{enrollment.track.steps.length}
+            </span>
+          </div>
+
+          {/* Step navigation */}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleStepChange(Math.max(1, selectedStep - 1))}
+              disabled={selectedStep <= 1}
+              className="h-8 w-8 p-0"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-medium min-w-[60px] text-center">
+              Step {selectedStep}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                handleStepChange(
+                  Math.min(enrollment.track.steps.length, selectedStep + 1)
+                )
+              }
+              disabled={
+                selectedStep >= enrollment.current_step ||
+                selectedStep >= enrollment.track.steps.length
+              }
+              className="h-8 w-8 p-0"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Toggle sidebar button */}
-      <button
-        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-        className="absolute left-0 top-1/2 transform -translate-y-1/2 z-10 bg-muted border rounded-r-md p-1 hover:bg-accent"
-        style={{ marginLeft: sidebarCollapsed ? 0 : "18rem" }}
-      >
-        {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-      </button>
+      {/* Main content */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Step list sidebar (desktop) */}
+        <div className="hidden lg:block w-56 border-r bg-muted/20 overflow-y-auto">
+          <div className="p-3">
+            <StepList
+              steps={enrollment.track.steps}
+              currentStep={enrollment.current_step}
+              selectedStep={selectedStep}
+              onSelectStep={handleStepChange}
+              estimatedMinutes={enrollment.track.estimated_minutes}
+            />
+          </div>
+        </div>
 
-      {/* Main content with resizable panes */}
-      <div className="flex-1 overflow-hidden">
-        <ResizablePane
-          topContent={instructionsContent}
-          bottomContent={terminalContent}
-          defaultTopHeight={60}
-          minTopHeight={30}
-          maxTopHeight={80}
-        />
+        {/* Mobile step list overlay */}
+        {stepListOpen && (
+          <div className="absolute inset-0 z-40 lg:hidden">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => setStepListOpen(false)}
+            />
+            <div className="absolute left-0 top-0 bottom-0 w-72 bg-background border-r overflow-y-auto">
+              <div className="flex items-center justify-between p-4 border-b">
+                <span className="font-medium">Steps</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setStepListOpen(false)}
+                  className="h-8 w-8 p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="p-3">
+                <StepList
+                  steps={enrollment.track.steps}
+                  currentStep={enrollment.current_step}
+                  selectedStep={selectedStep}
+                  onSelectStep={handleStepChange}
+                  estimatedMinutes={enrollment.track.estimated_minutes}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* App window */}
+        <div className="flex-1 overflow-hidden">
+          {hasApp ? (
+            <AppWindow
+              enrollmentId={enrollmentId}
+              token={token!}
+              onStatusChange={setAppStatus}
+            />
+          ) : (
+            // No app - show instructions prominently
+            <div className="h-full overflow-y-auto p-6 lg:p-8">
+              {currentStepData ? (
+                <div className="max-w-3xl mx-auto">
+                  <div className="flex items-start justify-between mb-6">
+                    <div>
+                      <span className="text-xs font-medium px-2 py-1 rounded bg-primary/10 text-primary">
+                        Step {selectedStep}/{enrollment.track.steps.length}
+                      </span>
+                      <h1 className="text-2xl font-bold mt-2">{currentStepData.title}</h1>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <AIHelper
+                        stepTitle={currentStepData.title}
+                        stepInstructions={currentStepData.instructions_md || ""}
+                        lastError={lastError}
+                      />
+                      <CodeExplainer context={currentStepData.title} />
+                    </div>
+                  </div>
+                  <MarkdownRenderer
+                    content={currentStepData.instructions_md || "No instructions provided."}
+                  />
+                  {currentStepData.hints && currentStepData.hints.length > 0 && (
+                    <div className="mt-8">
+                      <ProgressiveHints hints={currentStepData.hints} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-muted-foreground text-center">
+                  Select a step to view instructions.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Instructions sidebar (only when app is present) */}
+        {hasApp && (
+          <InstructionsSidebar
+            step={currentStepData}
+            stepNumber={selectedStep}
+            totalSteps={enrollment.track.steps.length}
+            lastError={lastError}
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+        )}
       </div>
+
+      {/* Terminal drawer */}
+      <TerminalDrawer
+        enrollmentId={enrollmentId}
+        token={token!}
+        canRunSetup={canRunSetup}
+        canValidate={canValidate}
+        isRunning={isRunning}
+        lastResult={lastResult}
+        setupStatus={setupStatus}
+        onRunScript={runScript}
+        onAdvanced={loadEnrollment}
+      />
     </div>
   );
 }

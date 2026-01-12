@@ -132,6 +132,17 @@ class TrackUpdate(BaseModel):
     tags: Optional[list[str]] = None
     difficulty: Optional[str] = None
     estimated_minutes: Optional[int] = None
+    # App configuration
+    app_url_template: Optional[str] = None
+    app_container_image: Optional[str] = None
+    app_container_ports: Optional[list[dict]] = None  # [{container: int, host: int|null}]
+    app_container_command: Optional[str] = None
+    app_container_lifecycle: Optional[str] = None  # "enrollment" | "step"
+    app_container_env: Optional[dict[str, str]] = None
+    auto_run_setup: Optional[bool] = None
+    auto_login_type: Optional[str] = None  # "none" | "url_params" | "cookies"
+    auto_login_config: Optional[dict] = None  # {params: {}, cookies: []}
+    init_script: Optional[str] = None  # Runs once when lab starts, outputs JSON
 
 
 class Track(TrackBase):
