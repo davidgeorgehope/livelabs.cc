@@ -116,6 +116,17 @@ class TrackBase(BaseModel):
     tags: list[str] = []
     difficulty: str = "beginner"  # beginner, intermediate, advanced
     estimated_minutes: Optional[int] = None
+    # App configuration
+    app_url_template: Optional[str] = None
+    app_container_image: Optional[str] = None
+    app_container_ports: list[dict] = []
+    app_container_command: Optional[str] = None
+    app_container_lifecycle: str = "enrollment"
+    app_container_env: dict = {}
+    auto_run_setup: bool = True
+    auto_login_type: str = "none"
+    auto_login_config: dict = {}
+    init_script: Optional[str] = None
 
 
 class TrackCreate(TrackBase):

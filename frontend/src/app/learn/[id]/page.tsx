@@ -179,7 +179,7 @@ export default function TrackPlayerPage() {
   const isCompleted = enrollment.completed_at !== null;
   const canRunSetup = selectedStep <= enrollment.current_step && !!currentStepData?.setup_script;
   const canValidate = selectedStep <= enrollment.current_step && !!currentStepData?.validation_script;
-  const hasApp = enrollment.track.app_url_template || enrollment.track.app_container_image;
+  const hasApp = enrollment.track.app_url_template || enrollment.track.app_container_image || enrollment.track.init_script;
 
   const lastError =
     lastResult && !lastResult.success && lastResult.stderr ? lastResult.stderr : null;
