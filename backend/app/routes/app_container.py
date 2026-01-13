@@ -7,10 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Enrollment, User
+from .. import models, auth
 from ..app_container import app_container_manager
 from ..runner import runner
-from .auth import get_current_user
 
 router = APIRouter(prefix="/enrollments/{enrollment_id}/app", tags=["app-container"])
 
@@ -18,15 +17,15 @@ router = APIRouter(prefix="/enrollments/{enrollment_id}/app", tags=["app-contain
 def get_enrollment_or_404(
     enrollment_id: int,
     db: Session,
-    current_user: User
-) -> Enrollment:
+    current_user: models.User
+) -> models.Enrollment:
     """Get enrollment and verify ownership"""
-    enrollment = db.query(Enrollment).filter(
-        Enrollment.id == enrollment_id
+    enrollment = db.query(models.Enrollment).filter(
+        models.Enrollment.id == enrollment_id
     ).first()
 
     if not enrollment:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
+        raise HTTPException(status_code=404, detail="models.Enrollment not found")
 
     if enrollment.user_id != current_user.id and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Not authorized")
@@ -38,7 +37,7 @@ def get_enrollment_or_404(
 def get_app_status(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: models.User = Depends(auth.get_current_user)
 ):
     """
     Get app status for enrollment.
@@ -126,7 +125,7 @@ def get_app_status(
 def run_init(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: models.User = Depends(auth.get_current_user)
 ):
     """
     Run the track's initialization script.
@@ -245,7 +244,7 @@ def run_init(
 def start_app_container(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: models.User = Depends(auth.get_current_user)
 ):
     """
     Start app container for enrollment.
@@ -270,7 +269,7 @@ def start_app_container(
 def restart_app_container(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: models.User = Depends(auth.get_current_user)
 ):
     """
     Restart app container for enrollment.
@@ -294,7 +293,7 @@ def restart_app_container(
 def stop_app_container(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: models.User = Depends(auth.get_current_user)
 ):
     """
     Stop app container for enrollment.
