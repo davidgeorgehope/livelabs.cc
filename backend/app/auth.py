@@ -9,10 +9,14 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from .database import get_db
 
-# Config - Get secret from environment variable with fallback for development
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
-if SECRET_KEY == "dev-secret-key-change-in-production" and os.getenv("ENVIRONMENT") == "production":
-    raise ValueError("JWT_SECRET_KEY must be set in production environment")
+# Config - Get secret from environment variable
+# SECURITY: No default value - JWT_SECRET_KEY must be explicitly set
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError(
+        "JWT_SECRET_KEY environment variable is required. "
+        "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+    )
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15  # Short-lived access tokens

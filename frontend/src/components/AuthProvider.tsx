@@ -1,14 +1,14 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { auth, User } from "@/lib/api";
+import { auth, User, RegisterResponse } from "@/lib/api";
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string, orgSlug?: string, inviteCode?: string) => Promise<void>;
+  register: (email: string, password: string, name: string, orgSlug?: string, inviteCode?: string) => Promise<RegisterResponse>;
   logout: () => void;
 }
 
@@ -46,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await fetchUser(response.access_token);
   };
 
-  const register = async (email: string, password: string, name: string, orgSlug?: string, inviteCode?: string) => {
+  const register = async (email: string, password: string, name: string, orgSlug?: string, inviteCode?: string): Promise<RegisterResponse> => {
     const response = await auth.register({
       email,
       password,
@@ -54,8 +54,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       org_slug: orgSlug,
       invite_code: inviteCode
     });
-    localStorage.setItem("token", response.access_token);
-    await fetchUser(response.access_token);
+    // Registration now returns pending status - no token until admin approves
+    return response;
   };
 
   const logout = () => {

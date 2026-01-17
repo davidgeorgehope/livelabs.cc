@@ -26,6 +26,7 @@ class User(Base):
     is_author = Column(Boolean, default=False)
     is_admin = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
+    status = Column(String(20), default="pending")  # pending, approved, rejected
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Clock, XCircle, AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,6 +17,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Detect status-specific errors from the backend
+  const isPending = error?.toLowerCase().includes("pending");
+  const isRejected = error?.toLowerCase().includes("not approved");
+  const isDeactivated = error?.toLowerCase().includes("deactivated");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,8 +48,16 @@ export default function LoginPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
-                {error}
+              <div className={`text-sm p-3 rounded-md flex items-start gap-2 ${
+                isPending ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200" :
+                isRejected ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200" :
+                isDeactivated ? "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200" :
+                "bg-destructive/10 text-destructive"
+              }`}>
+                {isPending ? <Clock className="h-5 w-5 flex-shrink-0 mt-0.5" /> :
+                 isRejected ? <XCircle className="h-5 w-5 flex-shrink-0 mt-0.5" /> :
+                 <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />}
+                <span>{error}</span>
               </div>
             )}
 

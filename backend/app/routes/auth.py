@@ -1,13 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from .. import models, schemas, auth
 from ..database import get_db
+from ..email import send_signup_notification
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+limiter = Limiter(key_func=get_remote_address)
 
 
-@router.post("/register", response_model=schemas.Token)
-def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
+class RegisterResponse(BaseModel):
+    message: str
+    status: str  # "pending" or "approved"
+
+
+@router.post("/register", response_model=RegisterResponse)
+@limiter.limit("5/minute")
+def register(request: Request, user_data: schemas.UserCreate, db: Session = Depends(get_db)):
     from datetime import datetime
 
     # Check if email exists
@@ -77,12 +88,13 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
             db.add(org)
             db.flush()
 
-    # Create user
+    # Create user with pending status (requires admin approval)
     user = models.User(
         email=user_data.email,
         hashed_password=auth.get_password_hash(user_data.password),
         name=user_data.name,
-        is_author=True,  # All users can author by default
+        is_author=False,  # Set to True upon approval
+        status="pending",
         org_id=org.id
     )
     db.add(user)
@@ -94,18 +106,43 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    # Generate token
-    access_token = auth.create_access_token(data={"sub": user.id})
-    return schemas.Token(access_token=access_token)
+    # Send notification to admin (async via threading)
+    send_signup_notification(user.email, user.name)
+
+    return RegisterResponse(
+        message="Account created. Awaiting admin approval.",
+        status="pending"
+    )
 
 
 @router.post("/login", response_model=schemas.Token)
-def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(request: Request, user_data: schemas.UserLogin, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == user_data.email).first()
     if not user or not auth.verify_password(user_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
+        )
+
+    # Check user approval status - block pending and rejected users
+    user_status = getattr(user, 'status', 'approved')  # Default to approved for existing users
+    if user_status == "pending":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is pending approval. Please wait for an admin to review your registration."
+        )
+    if user_status == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account registration was not approved. Please contact support if you have questions."
+        )
+
+    # Also check is_active for suspended users
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been deactivated. Please contact support."
         )
 
     access_token = auth.create_access_token(data={"sub": user.id})

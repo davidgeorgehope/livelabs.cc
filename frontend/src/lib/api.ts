@@ -64,6 +64,11 @@ export interface Token {
   token_type: string;
 }
 
+export interface RegisterResponse {
+  message: string;
+  status: "pending" | "approved";
+}
+
 export interface User {
   id: number;
   email: string;
@@ -101,7 +106,7 @@ export const auth = {
     }),
 
   register: (data: RegisterRequest) =>
-    fetchAPI<Token>("/auth/register", {
+    fetchAPI<RegisterResponse>("/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -648,6 +653,18 @@ export interface GenerateInitScriptResponse {
   notes: string[];
 }
 
+export interface GenerateSetupRequest {
+  step_title: string;
+  step_instructions: string;
+  expected_state?: string;
+  additional_context?: string;
+}
+
+export interface GenerateSetupResponse {
+  setup_script: string;
+  notes: string[];
+}
+
 export const ai = {
   getHelp: (data: HelpRequest, token: string) =>
     fetchAPI<HelpResponse>("/ai/help", {
@@ -686,6 +703,13 @@ export const ai = {
 
   generateInitScript: (data: GenerateInitScriptRequest, token: string) =>
     fetchAPI<GenerateInitScriptResponse>("/ai/generate-init-script", {
+      method: "POST",
+      body: JSON.stringify(data),
+      token,
+    }),
+
+  generateSetup: (data: GenerateSetupRequest, token: string) =>
+    fetchAPI<GenerateSetupResponse>("/ai/generate-setup", {
       method: "POST",
       body: JSON.stringify(data),
       token,
@@ -894,6 +918,7 @@ export interface AdminUser {
   is_author: boolean;
   is_admin: boolean;
   is_active: boolean;
+  status: "pending" | "approved" | "rejected";
   org_id: number;
   organization_name: string | null;
   created_at: string;
@@ -914,6 +939,7 @@ export interface SystemStats {
   total_users: number;
   total_authors: number;
   total_admins: number;
+  pending_users: number;
   total_organizations: number;
   total_tracks: number;
   published_tracks: number;
@@ -934,15 +960,19 @@ export const admin = {
   getStats: (token: string) =>
     fetchAPI<SystemStats>("/admin/stats", { token }),
 
-  listUsers: (token: string, params?: { search?: string; org_id?: number; is_author?: boolean; is_admin?: boolean }) => {
+  listUsers: (token: string, params?: { search?: string; org_id?: number; is_author?: boolean; is_admin?: boolean; status?: string }) => {
     const searchParams = new URLSearchParams();
     if (params?.search) searchParams.set("search", params.search);
     if (params?.org_id) searchParams.set("org_id", params.org_id.toString());
     if (params?.is_author !== undefined) searchParams.set("is_author", params.is_author.toString());
     if (params?.is_admin !== undefined) searchParams.set("is_admin", params.is_admin.toString());
+    if (params?.status) searchParams.set("status", params.status);
     const query = searchParams.toString();
     return fetchAPI<AdminUser[]>(`/admin/users${query ? `?${query}` : ""}`, { token });
   },
+
+  listPendingUsers: (token: string) =>
+    fetchAPI<AdminUser[]>("/admin/pending-users", { token }),
 
   getUser: (userId: number, token: string) =>
     fetchAPI<AdminUser>(`/admin/users/${userId}`, { token }),
@@ -951,6 +981,19 @@ export const admin = {
     fetchAPI<AdminUser>(`/admin/users/${userId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+      token,
+    }),
+
+  approveUser: (userId: number, token: string) =>
+    fetchAPI<AdminUser>(`/admin/users/${userId}/approve`, {
+      method: "POST",
+      token,
+    }),
+
+  rejectUser: (userId: number, reason: string | null, token: string) =>
+    fetchAPI<AdminUser>(`/admin/users/${userId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
       token,
     }),
 

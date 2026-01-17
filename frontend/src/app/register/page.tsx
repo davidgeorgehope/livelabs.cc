@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -9,9 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { organizations, OrganizationPublic } from "@/lib/api";
+import { CheckCircle } from "lucide-react";
 
 export default function RegisterPage() {
-  const router = useRouter();
   const { register } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -22,6 +21,7 @@ export default function RegisterPage() {
   const [availableOrgs, setAvailableOrgs] = useState<OrganizationPublic[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [registrationComplete, setRegistrationComplete] = useState(false);
 
   // Password validation
   const passwordChecks = {
@@ -53,14 +53,49 @@ export default function RegisterPage() {
       // If joining an existing org, pass the slug
       // If creating new, pass undefined (backend will auto-create)
       const orgSlug = orgMode === "join" ? selectedOrg : undefined;
-      await register(email, password, name, orgSlug);
-      router.push("/learn");
+      const response = await register(email, password, name, orgSlug);
+
+      // Show pending approval message
+      if (response.status === "pending") {
+        setRegistrationComplete(true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Show success message if registration is complete
+  if (registrationComplete) {
+    return (
+      <div className="container mx-auto px-4 py-16 flex justify-center">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-4">
+              <CheckCircle className="h-16 w-16 text-green-500" />
+            </div>
+            <CardTitle>Registration Complete!</CardTitle>
+            <CardDescription className="text-base mt-2">
+              Your account has been created and is awaiting admin approval.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-muted-foreground">
+              You will receive an email notification once your account has been approved.
+              This typically happens within 24 hours.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Already approved?{" "}
+              <Link href="/login" className="text-primary hover:underline">
+                Try logging in
+              </Link>
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4 py-16 flex justify-center">

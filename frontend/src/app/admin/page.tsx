@@ -22,6 +22,9 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  Clock,
+  UserCheck,
+  UserX,
 } from "lucide-react";
 
 export default function AdminDashboardPage() {
@@ -34,11 +37,14 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [userSearch, setUserSearch] = useState("");
   const [orgSearch, setOrgSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "organizations" | "infrastructure">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "pending" | "users" | "organizations" | "infrastructure">("overview");
   const [trackImages, setTrackImages] = useState<TrackImage[]>([]);
   const [diskUsage, setDiskUsage] = useState<DiskUsage | null>(null);
   const [pullingImages, setPullingImages] = useState<Set<string>>(new Set());
   const [infraLoading, setInfraLoading] = useState(false);
+  const [pendingUsers, setPendingUsers] = useState<AdminUser[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -105,6 +111,54 @@ export default function AdminDashboardPage() {
       setUsers(users.map((u) => (u.id === userId ? updated : u)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed");
+    }
+  };
+
+  const loadPendingUsers = async () => {
+    if (!token) return;
+    setPendingLoading(true);
+    try {
+      const pending = await admin.listPendingUsers(token);
+      setPendingUsers(pending);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load pending users");
+    } finally {
+      setPendingLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "pending" && token && pendingUsers.length === 0) {
+      loadPendingUsers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, token]);
+
+  const handleApproveUser = async (userId: number) => {
+    if (!token) return;
+    try {
+      await admin.approveUser(userId, token);
+      setPendingUsers(pendingUsers.filter((u) => u.id !== userId));
+      // Refresh stats to update pending count
+      const newStats = await admin.getStats(token);
+      setStats(newStats);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approval failed");
+    }
+  };
+
+  const handleRejectUser = async (userId: number) => {
+    if (!token) return;
+    const reason = rejectReason || null;
+    try {
+      await admin.rejectUser(userId, reason, token);
+      setPendingUsers(pendingUsers.filter((u) => u.id !== userId));
+      setRejectReason("");
+      // Refresh stats to update pending count
+      const newStats = await admin.getStats(token);
+      setStats(newStats);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Rejection failed");
     }
   };
 
@@ -229,17 +283,24 @@ export default function AdminDashboardPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6 flex-wrap">
-        {(["overview", "users", "organizations", "infrastructure"] as const).map((tab) => (
+        {(["overview", "pending", "users", "organizations", "infrastructure"] as const).map((tab) => (
           <Button
             key={tab}
             variant={activeTab === tab ? "default" : "outline"}
             onClick={() => setActiveTab(tab)}
+            className="relative"
           >
             {tab === "overview" && <Activity className="h-4 w-4 mr-2" />}
+            {tab === "pending" && <Clock className="h-4 w-4 mr-2" />}
             {tab === "users" && <Users className="h-4 w-4 mr-2" />}
             {tab === "organizations" && <Building2 className="h-4 w-4 mr-2" />}
             {tab === "infrastructure" && <HardDrive className="h-4 w-4 mr-2" />}
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === "pending" ? "Pending Approval" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === "pending" && stats && stats.pending_users > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                {stats.pending_users}
+              </span>
+            )}
           </Button>
         ))}
       </div>
@@ -329,6 +390,73 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {activeTab === "pending" && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Pending User Approvals</CardTitle>
+                <CardDescription>Review and approve new user registrations</CardDescription>
+              </div>
+              <Button variant="outline" onClick={loadPendingUsers} disabled={pendingLoading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${pendingLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {pendingLoading ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+                Loading pending users...
+              </div>
+            ) : pendingUsers.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <UserCheck className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No pending user approvals</p>
+                <p className="text-sm mt-1">All caught up!</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {pendingUsers.map((u) => (
+                  <div key={u.id} className="border rounded-lg p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="font-medium">{u.name}</h3>
+                        <p className="text-sm text-muted-foreground">{u.email}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Organization: {u.organization_name || "Personal"} |
+                          Registered: {new Date(u.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => handleApproveUser(u.id)}
+                        >
+                          <UserCheck className="h-4 w-4 mr-1" />
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleRejectUser(u.id)}
+                        >
+                          <UserX className="h-4 w-4 mr-1" />
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {activeTab === "users" && (

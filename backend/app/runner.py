@@ -1,6 +1,10 @@
 import time
+import logging
+from datetime import datetime
 import docker
 from docker.errors import ContainerError, ImageNotFound, APIError
+
+logger = logging.getLogger(__name__)
 
 
 class ScriptRunner:
@@ -19,17 +23,28 @@ class ScriptRunner:
         self,
         script: str,
         environment: dict[str, str],
-        docker_image: str = "livelabs-runner:latest"
+        docker_image: str = "livelabs-runner:latest",
+        user_id: int = None,
+        script_type: str = None
     ) -> dict:
         """
-        Run a script in a Docker container.
+        Run a script in a Docker container with security hardening.
 
         Returns:
             dict with keys: success, stdout, stderr, exit_code, duration_ms
         """
         start_time = time.time()
+        container_id = None
+
+        # Log script execution
+        script_preview = script[:200] + "..." if len(script) > 200 else script
+        logger.info(
+            f"Script execution started | user_id={user_id} | type={script_type} | "
+            f"image={docker_image} | script_preview={script_preview!r}"
+        )
 
         if not script.strip():
+            logger.info(f"Script execution skipped (empty) | user_id={user_id}")
             return {
                 "success": True,
                 "stdout": "",
@@ -52,6 +67,7 @@ class ScriptRunner:
                 cpu_period=100000,
                 cpu_quota=50000,  # 50% of one CPU
             )
+            container_id = container.id
 
             # Wait for completion with timeout
             result = container.wait(timeout=self.timeout)
@@ -63,6 +79,12 @@ class ScriptRunner:
 
             duration_ms = int((time.time() - start_time) * 1000)
 
+            # Log completion
+            logger.info(
+                f"Script execution completed | user_id={user_id} | container_id={container_id} | "
+                f"exit_code={exit_code} | duration_ms={duration_ms} | success={exit_code == 0}"
+            )
+
             return {
                 "success": exit_code == 0,
                 "stdout": stdout,
@@ -73,6 +95,10 @@ class ScriptRunner:
 
         except ContainerError as e:
             duration_ms = int((time.time() - start_time) * 1000)
+            logger.warning(
+                f"Script container error | user_id={user_id} | container_id={container_id} | "
+                f"exit_code={e.exit_status} | duration_ms={duration_ms}"
+            )
             return {
                 "success": False,
                 "stdout": e.stdout.decode("utf-8", errors="replace") if e.stdout else "",
@@ -83,6 +109,9 @@ class ScriptRunner:
 
         except ImageNotFound:
             duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                f"Script execution failed - image not found | user_id={user_id} | image={docker_image}"
+            )
             return {
                 "success": False,
                 "stdout": "",
@@ -93,6 +122,9 @@ class ScriptRunner:
 
         except APIError as e:
             duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                f"Script execution failed - Docker API error | user_id={user_id} | error={str(e)}"
+            )
             return {
                 "success": False,
                 "stdout": "",
@@ -103,6 +135,9 @@ class ScriptRunner:
 
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                f"Script execution failed - unexpected error | user_id={user_id} | error={str(e)}"
+            )
             return {
                 "success": False,
                 "stdout": "",

@@ -8,6 +8,7 @@ from sqlalchemy import func
 
 from .. import models, auth
 from ..database import get_db
+from ..email import send_approval_email, send_rejection_email
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -20,6 +21,7 @@ class UserResponse(BaseModel):
     is_author: bool
     is_admin: bool
     is_active: bool
+    status: str  # pending, approved, rejected
     org_id: int
     organization_name: Optional[str]
     created_at: datetime
@@ -46,6 +48,7 @@ class SystemStats(BaseModel):
     total_users: int
     total_authors: int
     total_admins: int
+    pending_users: int
     total_organizations: int
     total_tracks: int
     published_tracks: int
@@ -60,6 +63,10 @@ class UserUpdate(BaseModel):
     is_author: Optional[bool] = None
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
+
+
+class RejectRequest(BaseModel):
+    reason: Optional[str] = None
 
 
 class OrganizationUpdate(BaseModel):
@@ -79,6 +86,7 @@ def get_system_stats(
     total_users = db.query(models.User).count()
     total_authors = db.query(models.User).filter(models.User.is_author == True).count()
     total_admins = db.query(models.User).filter(models.User.is_admin == True).count()
+    pending_users = db.query(models.User).filter(models.User.status == "pending").count()
 
     # Organization stats
     total_organizations = db.query(models.Organization).count()
@@ -118,6 +126,7 @@ def get_system_stats(
         total_users=total_users,
         total_authors=total_authors,
         total_admins=total_admins,
+        pending_users=pending_users,
         total_organizations=total_organizations,
         total_tracks=total_tracks,
         published_tracks=published_tracks,
@@ -136,6 +145,7 @@ def list_users(
     is_author: Optional[bool] = None,
     is_admin: Optional[bool] = None,
     is_active: Optional[bool] = None,
+    status: Optional[str] = None,
     limit: int = Query(default=50, le=100),
     offset: int = 0,
     current_user: models.User = Depends(auth.get_current_admin),
@@ -163,6 +173,9 @@ def list_users(
     if is_active is not None:
         query = query.filter(models.User.is_active == is_active)
 
+    if status is not None:
+        query = query.filter(models.User.status == status)
+
     users = query.order_by(models.User.created_at.desc()).offset(offset).limit(limit).all()
 
     result = []
@@ -177,6 +190,7 @@ def list_users(
             is_author=user.is_author,
             is_admin=user.is_admin,
             is_active=getattr(user, 'is_active', True),
+            status=getattr(user, 'status', 'approved'),
             org_id=user.org_id,
             organization_name=user.organization.name if user.organization else None,
             created_at=user.created_at,
@@ -211,6 +225,7 @@ def get_user(
         is_author=user.is_author,
         is_admin=user.is_admin,
         is_active=getattr(user, 'is_active', True),
+        status=getattr(user, 'status', 'approved'),
         org_id=user.org_id,
         organization_name=user.organization.name if user.organization else None,
         created_at=user.created_at,
@@ -261,6 +276,134 @@ def update_user(
         is_author=user.is_author,
         is_admin=user.is_admin,
         is_active=getattr(user, 'is_active', True),
+        status=getattr(user, 'status', 'approved'),
+        org_id=user.org_id,
+        organization_name=user.organization.name if user.organization else None,
+        created_at=user.created_at,
+        tracks_count=tracks_count,
+        enrollments_count=enrollments_count
+    )
+
+
+@router.get("/pending-users", response_model=list[UserResponse])
+def list_pending_users(
+    current_user: models.User = Depends(auth.get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """List all users with status='pending'"""
+    users = db.query(models.User).filter(
+        models.User.status == "pending"
+    ).order_by(models.User.created_at.desc()).all()
+
+    result = []
+    for user in users:
+        tracks_count = db.query(models.Track).filter(models.Track.author_id == user.id).count()
+        enrollments_count = db.query(models.Enrollment).filter(models.Enrollment.user_id == user.id).count()
+
+        result.append(UserResponse(
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            is_author=user.is_author,
+            is_admin=user.is_admin,
+            is_active=getattr(user, 'is_active', True),
+            status=getattr(user, 'status', 'pending'),
+            org_id=user.org_id,
+            organization_name=user.organization.name if user.organization else None,
+            created_at=user.created_at,
+            tracks_count=tracks_count,
+            enrollments_count=enrollments_count
+        ))
+
+    return result
+
+
+@router.post("/users/{user_id}/approve", response_model=UserResponse)
+def approve_user(
+    user_id: int,
+    current_user: models.User = Depends(auth.get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Approve a pending user - sets status='approved' and is_author=True"""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    if getattr(user, 'status', 'approved') != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not pending approval"
+        )
+
+    user.status = "approved"
+    user.is_author = True
+    db.commit()
+    db.refresh(user)
+
+    # Send approval notification email
+    send_approval_email(user.email, user.name)
+
+    tracks_count = db.query(models.Track).filter(models.Track.author_id == user.id).count()
+    enrollments_count = db.query(models.Enrollment).filter(models.Enrollment.user_id == user.id).count()
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        is_author=user.is_author,
+        is_admin=user.is_admin,
+        is_active=getattr(user, 'is_active', True),
+        status=user.status,
+        org_id=user.org_id,
+        organization_name=user.organization.name if user.organization else None,
+        created_at=user.created_at,
+        tracks_count=tracks_count,
+        enrollments_count=enrollments_count
+    )
+
+
+@router.post("/users/{user_id}/reject", response_model=UserResponse)
+def reject_user(
+    user_id: int,
+    data: RejectRequest,
+    current_user: models.User = Depends(auth.get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Reject a pending user - sets status='rejected'"""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    if getattr(user, 'status', 'approved') != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not pending approval"
+        )
+
+    user.status = "rejected"
+    db.commit()
+    db.refresh(user)
+
+    # Send rejection notification email
+    send_rejection_email(user.email, user.name, data.reason)
+
+    tracks_count = db.query(models.Track).filter(models.Track.author_id == user.id).count()
+    enrollments_count = db.query(models.Enrollment).filter(models.Enrollment.user_id == user.id).count()
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        is_author=user.is_author,
+        is_admin=user.is_admin,
+        is_active=getattr(user, 'is_active', True),
+        status=user.status,
         org_id=user.org_id,
         organization_name=user.organization.name if user.organization else None,
         created_at=user.created_at,
