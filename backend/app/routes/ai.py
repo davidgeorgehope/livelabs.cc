@@ -540,3 +540,106 @@ echo '{"url": "https://example.com", "cookies": []}'
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"AI service error: {str(e)}"
         )
+
+
+class GenerateSetupRequest(BaseModel):
+    step_title: str
+    step_instructions: str
+    expected_state: Optional[str] = None
+    additional_context: Optional[str] = None
+
+
+class GenerateSetupResponse(BaseModel):
+    setup_script: str
+    notes: list[str] = []
+
+
+@router.post("/generate-setup", response_model=GenerateSetupResponse)
+def generate_setup(
+    request: GenerateSetupRequest,
+    current_user: models.User = Depends(auth.get_current_author)
+):
+    """Generate a setup script for a step"""
+    try:
+        ai_client = get_client()
+    except HTTPException:
+        raise
+
+    system_prompt = """You are a script writing assistant for technical learning platforms.
+Generate bash setup scripts that prepare the lab environment for learners.
+
+Requirements:
+- Start with #!/bin/bash and set -e
+- Create files, install dependencies, configure environment as needed
+- Include helpful comments explaining each section
+- Exit 0 on success, non-zero on failure
+- Keep it focused and avoid unnecessary steps"""
+
+    user_content = f"""Create a setup script for a step titled "{request.step_title}".
+
+Step instructions:
+{request.step_instructions}
+"""
+
+    if request.expected_state:
+        user_content += f"\nExpected state after setup: {request.expected_state}\n"
+
+    if request.additional_context:
+        user_content += f"\nAdditional context: {request.additional_context}\n"
+
+    user_content += """
+
+Generate:
+1. A bash setup script that prepares the environment for this step
+2. 2-3 notes about what the script does
+
+Return the script in a ```bash code block and notes as a numbered list."""
+
+    try:
+        message = ai_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}]
+        )
+
+        response_text = message.content[0].text
+
+        # Extract script from code block
+        script = ""
+        in_code_block = False
+        script_lines = []
+        for line in response_text.split('\n'):
+            if line.strip().startswith('```bash') or line.strip().startswith('```shell'):
+                in_code_block = True
+                continue
+            elif line.strip() == '```' and in_code_block:
+                in_code_block = False
+                continue
+            elif in_code_block:
+                script_lines.append(line)
+
+        script = '\n'.join(script_lines)
+
+        # Extract notes
+        notes = []
+        for line in response_text.split('\n'):
+            line = line.strip()
+            if line and (line[0].isdigit() and '.' in line[:3]):
+                note_text = line.split('.', 1)[1].strip() if '.' in line else line
+                if len(note_text) > 5:
+                    notes.append(note_text)
+
+        if not script.strip():
+            script = '#!/bin/bash\nset -e\n\n# TODO: Add setup commands\nexit 0'
+
+        return GenerateSetupResponse(
+            setup_script=script,
+            notes=notes[:5]
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"AI service error: {str(e)}"
+        )

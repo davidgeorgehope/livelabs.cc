@@ -5,6 +5,18 @@ import { Button } from "@/components/ui/button";
 import { AppContainerStatus, appContainer } from "@/lib/api";
 import { RefreshCw, Play, Loader2, AlertCircle, ExternalLink, Globe, RotateCcw } from "lucide-react";
 
+// Check if URL is external (can't be embedded in iframe due to X-Frame-Options)
+function isExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.origin !== window.location.origin &&
+           !parsed.hostname.includes('localhost') &&
+           !parsed.hostname.includes('127.0.0.1');
+  } catch {
+    return false;
+  }
+}
+
 interface AppWindowProps {
   enrollmentId: number;
   token: string;
@@ -387,24 +399,47 @@ export function AppWindow({ enrollmentId, token, onStatusChange }: AppWindowProp
           </div>
         </div>
 
-        {/* Iframe container */}
+        {/* Content area */}
         <div className="flex-1 relative bg-white">
-          {!iframeLoaded && (
-            <div className="absolute inset-0 flex items-center justify-center bg-muted/30">
-              <div className="flex flex-col items-center gap-3">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <span className="text-sm text-muted-foreground">Loading application...</span>
+          {isExternalUrl(status.url) ? (
+            /* External URLs can't be embedded - show open in new tab */
+            <div className="absolute inset-0 flex items-center justify-center bg-muted/10">
+              <div className="flex flex-col items-center gap-4 text-center p-6">
+                <Globe className="h-12 w-12 text-muted-foreground" />
+                <div>
+                  <h3 className="font-medium text-lg">External Application</h3>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                    This application is hosted externally and cannot be embedded.
+                    Click below to open it in a new tab.
+                  </p>
+                </div>
+                <Button onClick={() => window.open(status.url, '_blank')} className="gap-2">
+                  <ExternalLink className="h-4 w-4" />
+                  Open {new URL(status.url).hostname}
+                </Button>
               </div>
             </div>
+          ) : (
+            /* Local/same-origin URLs can be embedded in iframe */
+            <>
+              {!iframeLoaded && (
+                <div className="absolute inset-0 flex items-center justify-center bg-muted/30">
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">Loading application...</span>
+                  </div>
+                </div>
+              )}
+              <iframe
+                ref={iframeRef}
+                src={status.url}
+                className="w-full h-full border-0"
+                onLoad={() => setIframeLoaded(true)}
+                allow="clipboard-write; clipboard-read"
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
+              />
+            </>
           )}
-          <iframe
-            ref={iframeRef}
-            src={status.url}
-            className="w-full h-full border-0"
-            onLoad={() => setIframeLoaded(true)}
-            allow="clipboard-write; clipboard-read"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
-          />
         </div>
 
         {error && (

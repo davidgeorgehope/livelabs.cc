@@ -89,6 +89,7 @@ export default function TrackEditorPage() {
 
   // Track settings state
   const [showSettings, setShowSettings] = useState(false);
+  const [showTrackScripts, setShowTrackScripts] = useState(false);
   const [trackTags, setTrackTags] = useState("");
   const [trackDifficulty, setTrackDifficulty] = useState("beginner");
   const [trackEstimatedMinutes, setTrackEstimatedMinutes] = useState("");
@@ -145,7 +146,7 @@ export default function TrackEditorPage() {
       }));
       setAutoLoginParams(loginParams.length > 0 ? loginParams : []);
       setInitScript(data.init_script || "");
-      if (data.steps.length > 0 && !selectedStepId) {
+      if (data.steps.length > 0 && !selectedStepId && !showTrackScripts) {
         selectStep(data.steps[0]);
       }
     } catch (err) {
@@ -153,7 +154,7 @@ export default function TrackEditorPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [slug, token, selectedStepId]);
+  }, [slug, token, selectedStepId, showTrackScripts]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -166,11 +167,18 @@ export default function TrackEditorPage() {
 
   const selectStep = (step: Step) => {
     setSelectedStepId(step.id);
+    setShowTrackScripts(false);
     setStepTitle(step.title);
     setStepInstructions(step.instructions_md);
     setSetupScript(step.setup_script);
     setValidationScript(step.validation_script);
     setStepHints(step.hints || []);
+    setHasUnsavedChanges(false);
+  };
+
+  const selectTrackScripts = () => {
+    setSelectedStepId(null);
+    setShowTrackScripts(true);
     setHasUnsavedChanges(false);
   };
 
@@ -232,9 +240,13 @@ export default function TrackEditorPage() {
     };
 
     try {
-      await steps.update(slug, selectedStepId, update, token);
+      const updatedStep = await steps.update(slug, selectedStepId, update, token);
       setHasUnsavedChanges(false);
-      await loadTrack();
+      // Update track.steps locally with the returned step data (no refetch needed)
+      setTrack(prev => prev ? {
+        ...prev,
+        steps: prev.steps.map(s => s.id === updatedStep.id ? updatedStep : s)
+      } : prev);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save step");
     } finally {
@@ -379,6 +391,27 @@ export default function TrackEditorPage() {
     if (template) {
       setInitScript(template.script);
       setInitAiNotes([]);
+      setHasUnsavedChanges(true);
+    }
+  };
+
+  const handleInitScriptChange = (value: string) => {
+    setInitScript(value);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleSaveInitScript = async () => {
+    if (!token || !track) return;
+
+    setIsSaving(true);
+    try {
+      await tracks.update(slug, { init_script: initScript || null }, token);
+      setHasUnsavedChanges(false);
+      await loadTrack();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save init script");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -646,79 +679,6 @@ export default function TrackEditorPage() {
                     </div>
                   </>
                 )}
-
-                {/* Initialization Script */}
-                <div className="space-y-3 pt-4 border-t">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="initScript">Initialization Script</Label>
-                    <div className="flex items-center gap-2">
-                      <select
-                        onChange={(e) => {
-                          if (e.target.value) handleLoadTemplate(e.target.value);
-                          e.target.value = "";
-                        }}
-                        className="h-8 px-2 text-xs rounded-md border border-input bg-background"
-                        defaultValue=""
-                      >
-                        <option value="" disabled>Load template...</option>
-                        {Object.entries(INIT_SCRIPT_TEMPLATES).map(([key, tmpl]) => (
-                          <option key={key} value={key}>{tmpl.name}</option>
-                        ))}
-                      </select>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleGenerateInitScript}
-                        disabled={isGeneratingInit}
-                        className="h-8"
-                      >
-                        {isGeneratingInit ? (
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-3 w-3 mr-1" />
-                        )}
-                        Generate
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Runs once when learner starts the lab. Must output JSON with URL and optional cookies.
-                  </p>
-
-                  {/* AI Context Input */}
-                  <div className="space-y-1">
-                    <Input
-                      value={initAiContext}
-                      onChange={(e) => setInitAiContext(e.target.value)}
-                      placeholder="Describe what the script should do (for AI generation)..."
-                      className="text-xs"
-                    />
-                  </div>
-
-                  <textarea
-                    id="initScript"
-                    value={initScript}
-                    onChange={(e) => setInitScript(e.target.value)}
-                    placeholder="#!/bin/bash&#10;# Your initialization script here...&#10;&#10;echo '{&quot;url&quot;: &quot;https://example.com&quot;, &quot;cookies&quot;: []}'"
-                    className="w-full h-48 px-3 py-2 rounded-md border border-input bg-background font-mono text-xs"
-                  />
-
-                  {/* AI Notes */}
-                  {initAiNotes.length > 0 && (
-                    <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded-md border border-blue-200 dark:border-blue-800">
-                      <p className="text-xs font-medium text-blue-800 dark:text-blue-200 mb-1">Notes:</p>
-                      <ul className="text-xs text-blue-700 dark:text-blue-300 space-y-0.5">
-                        {initAiNotes.map((note, i) => (
-                          <li key={i}>• {note}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  <p className="text-xs text-muted-foreground">
-                    Output format: {`{"url": "https://...", "cookies": [{"name": "...", "value": "..."}]}`}
-                  </p>
-                </div>
               </div>
 
               {/* Auto-Setup Configuration */}
@@ -830,8 +790,23 @@ export default function TrackEditorPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Step list sidebar */}
         <div className="w-64 border-r bg-muted/30 p-4 overflow-y-auto">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-medium">Steps</h2>
+          {/* Track Scripts */}
+          <div className="mb-4">
+            <div
+              className={`flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer ${
+                showTrackScripts ? "bg-accent" : "hover:bg-accent/50"
+              }`}
+              onClick={selectTrackScripts}
+            >
+              <span className="flex-shrink-0 w-5 h-5 rounded bg-primary/10 flex items-center justify-center text-xs">
+                T
+              </span>
+              <span className="flex-1 text-sm font-medium">Track Scripts</span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-medium text-sm text-muted-foreground">Steps</h2>
             <Button variant="ghost" size="sm" onClick={handleAddStep}>
               <Plus className="h-4 w-4" />
             </Button>
@@ -913,9 +888,110 @@ export default function TrackEditorPage() {
                 />
               </div>
             </div>
+          ) : showTrackScripts ? (
+            <div className="flex flex-col h-full">
+              {/* Track Scripts title bar */}
+              <div className="flex items-center gap-4 px-4 py-3 border-b bg-muted/30">
+                <div className="flex-1">
+                  <h2 className="text-lg font-medium">Initialization Script</h2>
+                  <p className="text-xs text-muted-foreground">Runs once when learner starts the lab</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {hasUnsavedChanges && (
+                    <span className="text-xs text-orange-500">Unsaved changes</span>
+                  )}
+                  <Button onClick={handleSaveInitScript} disabled={isSaving} size="sm">
+                    <Save className="h-4 w-4 mr-1" />
+                    {isSaving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Init Script Editor */}
+              <div className="flex-1 p-4 overflow-y-auto">
+                <div className="max-w-4xl space-y-4">
+                  {/* Template and AI controls */}
+                  <div className="flex items-center gap-2">
+                    <select
+                      onChange={(e) => {
+                        if (e.target.value) handleLoadTemplate(e.target.value);
+                        e.target.value = "";
+                      }}
+                      className="h-9 px-3 text-sm rounded-md border border-input bg-background"
+                      defaultValue=""
+                    >
+                      <option value="" disabled>Load template...</option>
+                      {Object.entries(INIT_SCRIPT_TEMPLATES).map(([key, tmpl]) => (
+                        <option key={key} value={key}>{tmpl.name}</option>
+                      ))}
+                    </select>
+                    <div className="flex-1">
+                      <Input
+                        value={initAiContext}
+                        onChange={(e) => setInitAiContext(e.target.value)}
+                        placeholder="Describe what the script should do (for AI generation)..."
+                        className="text-sm"
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={handleGenerateInitScript}
+                      disabled={isGeneratingInit}
+                    >
+                      {isGeneratingInit ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4 mr-1" />
+                      )}
+                      Generate
+                    </Button>
+                  </div>
+
+                  {/* AI Notes */}
+                  {initAiNotes.length > 0 && (
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-md border border-blue-200 dark:border-blue-800">
+                      <p className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-1">AI Notes:</p>
+                      <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-0.5">
+                        {initAiNotes.map((note, i) => (
+                          <li key={i}>• {note}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Script editor */}
+                  <div className="border rounded-md overflow-hidden">
+                    <div className="bg-muted/50 px-3 py-1.5 border-b flex items-center justify-between">
+                      <span className="text-sm font-mono text-muted-foreground">init.sh</span>
+                      <span className="text-xs text-muted-foreground">bash</span>
+                    </div>
+                    <textarea
+                      value={initScript}
+                      onChange={(e) => handleInitScriptChange(e.target.value)}
+                      placeholder="#!/bin/bash&#10;# Your initialization script here...&#10;&#10;# Must output JSON with URL:&#10;echo '{&quot;url&quot;: &quot;https://example.com&quot;, &quot;cookies&quot;: []}'"
+                      className="w-full h-96 px-4 py-3 font-mono text-sm bg-background resize-none focus:outline-none"
+                      spellCheck={false}
+                    />
+                  </div>
+
+                  {/* Help text */}
+                  <div className="text-sm text-muted-foreground space-y-2">
+                    <p><strong>Output format:</strong> The script must output valid JSON to stdout:</p>
+                    <pre className="bg-muted/50 px-3 py-2 rounded text-xs overflow-x-auto">
+{`{"url": "https://...", "cookies": [{"name": "session", "value": "..."}]}`}
+                    </pre>
+                    <p className="text-xs">
+                      • Environment secrets are available as variables (e.g., $API_KEY)<br/>
+                      • Exit code 0 = success, non-zero = failure<br/>
+                      • If App URL Template is configured, it overrides the script&apos;s URL output
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="h-full flex items-center justify-center text-muted-foreground">
-              Select a step to edit or create a new one
+              Select Track Scripts or a step to edit
             </div>
           )}
         </div>

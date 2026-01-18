@@ -118,6 +118,11 @@ class AppContainerManager:
                 "cpu_period": 100000,
                 "cpu_quota": 100000,  # 100% of one CPU
                 "restart_policy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "labels": {
+                    "app": "livelabs",
+                    "type": "app",
+                    "enrollment_id": str(enrollment.id),
+                },
             }
 
             if track.app_container_command:

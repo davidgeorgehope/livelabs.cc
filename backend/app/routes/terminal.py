@@ -1,6 +1,7 @@
 """Real-time terminal WebSocket endpoint"""
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from sqlalchemy.orm import Session
@@ -12,6 +13,9 @@ from ..database import get_db
 
 router = APIRouter(prefix="/terminal", tags=["terminal"])
 
+# Thread pool for blocking Docker socket I/O
+_executor = ThreadPoolExecutor(max_workers=10)
+
 
 class TerminalSession:
     """Manages a Docker container terminal session"""
@@ -21,27 +25,44 @@ class TerminalSession:
         self.exec_id = exec_id
         self.socket = socket
         self._closed = False
+        # Set socket to non-blocking for better async handling
+        self.socket._sock.setblocking(False)
 
     async def read_output(self, websocket: WebSocket):
         """Read output from container and send to WebSocket"""
+        loop = asyncio.get_event_loop()
         try:
             while not self._closed:
-                # Read from socket in chunks
-                data = self.socket._sock.recv(4096)
-                if not data:
+                try:
+                    # Use run_in_executor to avoid blocking the event loop
+                    self.socket._sock.setblocking(True)
+                    data = await loop.run_in_executor(
+                        _executor,
+                        lambda: self.socket._sock.recv(4096)
+                    )
+                    self.socket._sock.setblocking(False)
+                    if not data:
+                        break
+                    # Send raw bytes as text (terminal escape sequences included)
+                    await websocket.send_text(data.decode("utf-8", errors="replace"))
+                except BlockingIOError:
+                    await asyncio.sleep(0.01)
+                except Exception as e:
+                    if not self._closed:
+                        print(f"[TERMINAL] Read error: {e}")
                     break
-                # Send raw bytes as text (terminal escape sequences included)
-                await websocket.send_text(data.decode("utf-8", errors="replace"))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[TERMINAL] Read output error: {e}")
 
     def write_input(self, data: str):
         """Write input to container"""
         if not self._closed:
             try:
+                self.socket._sock.setblocking(True)
                 self.socket._sock.send(data.encode("utf-8"))
-            except Exception:
-                pass
+                self.socket._sock.setblocking(False)
+            except Exception as e:
+                print(f"[TERMINAL] Write error: {e}")
 
     def resize(self, rows: int, cols: int):
         """Resize terminal"""
@@ -118,8 +139,10 @@ async def terminal_websocket(
             return
 
         # Create Docker container with interactive shell
+        print(f"[TERMINAL] Creating container for enrollment {enrollment_id}")
         client = docker.from_env()
         docker_image = track.docker_image or "livelabs-runner:latest"
+        print(f"[TERMINAL] Using image: {docker_image}")
 
         try:
             container = client.containers.run(
@@ -133,12 +156,19 @@ async def terminal_websocket(
                 mem_limit="512m",
                 cpu_period=100000,
                 cpu_quota=50000,
+                labels={
+                    "app": "livelabs",
+                    "type": "terminal",
+                    "enrollment_id": str(enrollment_id),
+                },
             )
         except Exception as e:
+            print(f"[TERMINAL] Failed to start container: {e}")
             await websocket.send_json({"type": "error", "message": f"Failed to start container: {str(e)}"})
             await websocket.close(code=4500)
             return
 
+        print(f"[TERMINAL] Container created: {container.id}")
         # Create exec instance for interactive session
         try:
             exec_id = client.api.exec_create(
@@ -161,9 +191,11 @@ async def terminal_websocket(
             await websocket.close(code=4500)
             return
 
+        print(f"[TERMINAL] Exec started, creating session")
         session = TerminalSession(container, exec_id, socket)
 
         # Send ready message
+        print(f"[TERMINAL] Sending ready message")
         await websocket.send_json({"type": "ready", "message": "Terminal connected"})
 
         # Start reading output in background

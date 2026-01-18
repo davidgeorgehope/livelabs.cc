@@ -66,6 +66,10 @@ class ScriptRunner:
                 mem_limit="512m",
                 cpu_period=100000,
                 cpu_quota=50000,  # 50% of one CPU
+                labels={
+                    "app": "livelabs",
+                    "type": "script",
+                },
             )
             container_id = container.id
 

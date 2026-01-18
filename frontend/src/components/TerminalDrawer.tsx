@@ -57,9 +57,9 @@ export function TerminalDrawer({
   const drawerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
-  // Auto-expand on script run or setup failure
+  // Auto-expand on script run, setup running, or setup failure
   useEffect(() => {
-    if (isRunning || setupStatus.status === "failed" || lastResult?.stderr) {
+    if (isRunning || setupStatus.status === "running" || setupStatus.status === "failed" || lastResult?.stderr) {
       setIsExpanded(true);
     }
   }, [isRunning, setupStatus.status, lastResult?.stderr]);

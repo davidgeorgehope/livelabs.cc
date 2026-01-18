@@ -47,7 +47,8 @@ def get_app_status(
     track = enrollment.track
 
     # Check if track has any app configuration
-    has_app = bool(track.init_script or track.app_url_template or track.app_container_image)
+    has_init_script = track.init_script and track.init_script.strip()
+    has_app = bool(has_init_script or track.app_url_template or track.app_container_image)
 
     if not has_app:
         return {
@@ -55,8 +56,8 @@ def get_app_status(
             "has_app": False,
         }
 
-    # Check init status
-    if track.init_script:
+    # Step 1: If init_script exists, it must run first (for setup purposes)
+    if has_init_script:
         if enrollment.init_status == "pending":
             return {
                 "status": "needs_init",
@@ -70,33 +71,25 @@ def get_app_status(
             }
 
         if enrollment.init_status == "failed":
-            return {
-                "status": "init_failed",
-                "has_app": True,
-                "error": enrollment.init_error,
-            }
+            # If we have a configured URL, show it anyway (init failure is non-blocking)
+            # Otherwise report the failure
+            if not track.app_url_template:
+                return {
+                    "status": "init_failed",
+                    "has_app": True,
+                    "error": enrollment.init_error,
+                }
+            # Fall through to show configured URL despite init failure
+        # init_status == "success" or failed-but-has-url - fall through to URL logic
 
-        # init_status == "success" - use cached URL
-        return {
-            "status": "ready",
-            "has_app": True,
-            "url": enrollment.app_url,
-            "cookies": enrollment.app_cookies or [],
-            "type": "external",
-        }
+    # Step 2: Determine URL (init either succeeded or wasn't needed)
+    # Priority: app_url_template > init_script output > app_container
+    url = None
+    cookies = []
 
-    # No init script - check for static config or container
-    if track.app_container_image:
-        # Use app_container_manager for Docker containers
-        status = app_container_manager.get_status(db, enrollment_id)
-        if status.get("has_app"):
-            status["cookies"] = app_container_manager.get_auto_login_cookies(track)
-        return status
-
-    # Static URL only
     if track.app_url_template:
+        # Configured URL takes priority
         url = track.app_url_template
-        cookies = []
 
         # Add auto-login params
         if track.auto_login_type == "url_params" and track.auto_login_config:
@@ -110,6 +103,19 @@ def get_app_status(
         if track.auto_login_type == "cookies" and track.auto_login_config:
             cookies = track.auto_login_config.get("cookies", [])
 
+    elif has_init_script and enrollment.app_url:
+        # Use URL from init script output
+        url = enrollment.app_url
+        cookies = enrollment.app_cookies or []
+
+    elif track.app_container_image:
+        # Use Docker container
+        status = app_container_manager.get_status(db, enrollment_id)
+        if status.get("has_app"):
+            status["cookies"] = app_container_manager.get_auto_login_cookies(track)
+        return status
+
+    if url:
         return {
             "status": "ready",
             "has_app": True,
@@ -118,6 +124,7 @@ def get_app_status(
             "type": "external",
         }
 
+    # No URL available
     return {"status": "no_app", "has_app": False}
 
 

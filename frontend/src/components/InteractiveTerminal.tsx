@@ -133,6 +133,7 @@ export function InteractiveTerminal({
 
     term.open(terminalRef.current);
     fitAddon.fit();
+    term.focus();
 
     terminalInstance.current = term;
     fitAddonRef.current = fitAddon;
@@ -252,6 +253,7 @@ export function InteractiveTerminal({
         ref={terminalRef}
         className="flex-1 p-2"
         style={{ minHeight: isFullscreen ? "calc(100vh - 48px)" : "300px" }}
+        onClick={() => terminalInstance.current?.focus()}
       />
     </div>
   );

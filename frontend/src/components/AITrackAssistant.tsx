@@ -15,9 +15,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Wand2, Loader2, FileText, Code, Lightbulb, Check, Copy } from "lucide-react";
+import { Wand2, Loader2, FileText, Code, Lightbulb, Check, Copy, Play } from "lucide-react";
 
-type AssistantMode = "instructions" | "validation" | "hints";
+type AssistantMode = "instructions" | "setup" | "validation" | "hints";
 
 interface AITrackAssistantProps {
   stepTitle: string;
@@ -25,6 +25,7 @@ interface AITrackAssistantProps {
   currentSetupScript?: string;
   currentValidationScript?: string;
   onApplyInstructions?: (instructions: string) => void;
+  onApplySetup?: (script: string) => void;
   onApplyValidation?: (script: string, hints: string[]) => void;
   onApplyHints?: (hints: string[]) => void;
 }
@@ -35,6 +36,7 @@ export function AITrackAssistant({
   currentSetupScript,
   currentValidationScript,
   onApplyInstructions,
+  onApplySetup,
   onApplyValidation,
   onApplyHints,
 }: AITrackAssistantProps) {
@@ -48,6 +50,12 @@ export function AITrackAssistant({
   const [bulletPoints, setBulletPoints] = useState("");
   const [trackContext, setTrackContext] = useState("");
   const [generatedInstructions, setGeneratedInstructions] = useState("");
+
+  // Setup mode state
+  const [setupExpectedState, setSetupExpectedState] = useState("");
+  const [setupContext, setSetupContext] = useState("");
+  const [generatedSetup, setGeneratedSetup] = useState("");
+  const [setupNotes, setSetupNotes] = useState<string[]>([]);
 
   // Validation mode state
   const [expectedOutcome, setExpectedOutcome] = useState("");
@@ -83,6 +91,32 @@ export function AITrackAssistant({
       setGeneratedInstructions(response.instructions_md);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate instructions");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGenerateSetup = async () => {
+    if (!token) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await ai.generateSetup(
+        {
+          step_title: stepTitle,
+          step_instructions: currentInstructions || "",
+          expected_state: setupExpectedState || undefined,
+          additional_context: setupContext || undefined,
+        },
+        token
+      );
+
+      setGeneratedSetup(response.setup_script);
+      setSetupNotes(response.notes);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate setup script");
     } finally {
       setIsLoading(false);
     }
@@ -145,6 +179,14 @@ export function AITrackAssistant({
     }
   };
 
+  const handleApplySetup = () => {
+    if (onApplySetup && generatedSetup) {
+      onApplySetup(generatedSetup);
+      setIsOpen(false);
+      resetState();
+    }
+  };
+
   const handleApplyValidation = () => {
     if (onApplyValidation && generatedValidation) {
       onApplyValidation(generatedValidation, generatedHints);
@@ -171,6 +213,10 @@ export function AITrackAssistant({
     setBulletPoints("");
     setTrackContext("");
     setGeneratedInstructions("");
+    setSetupExpectedState("");
+    setSetupContext("");
+    setGeneratedSetup("");
+    setSetupNotes([]);
     setExpectedOutcome("");
     setGeneratedValidation("");
     setGeneratedHints([]);
@@ -182,6 +228,8 @@ export function AITrackAssistant({
     switch (m) {
       case "instructions":
         return <FileText className="h-4 w-4" />;
+      case "setup":
+        return <Play className="h-4 w-4" />;
       case "validation":
         return <Code className="h-4 w-4" />;
       case "hints":
@@ -193,6 +241,8 @@ export function AITrackAssistant({
     switch (m) {
       case "instructions":
         return "Instructions";
+      case "setup":
+        return "Setup";
       case "validation":
         return "Validation";
       case "hints":
@@ -222,7 +272,7 @@ export function AITrackAssistant({
         <div className="flex-1 flex flex-col mt-4 overflow-hidden">
           {/* Mode tabs */}
           <div className="flex gap-1 mb-4 p-1 bg-muted rounded-lg">
-            {(["instructions", "validation", "hints"] as AssistantMode[]).map((m) => (
+            {(["instructions", "setup", "validation", "hints"] as AssistantMode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => {
@@ -307,6 +357,94 @@ export function AITrackAssistant({
                       {generatedInstructions}
                     </pre>
                     <Button onClick={handleApplyInstructions} className="w-full">
+                      Apply to Step
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {mode === "setup" && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="setupExpectedState">Expected state after setup</Label>
+                  <Textarea
+                    id="setupExpectedState"
+                    value={setupExpectedState}
+                    onChange={(e) => setSetupExpectedState(e.target.value)}
+                    placeholder="Describe what should exist after setup runs:&#10;A config file in /etc/myapp/&#10;Required packages installed&#10;Database initialized"
+                    className="min-h-[100px]"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    What environment should be ready for the learner?
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="setupContext">Additional context (optional)</Label>
+                  <Input
+                    id="setupContext"
+                    value={setupContext}
+                    onChange={(e) => setSetupContext(e.target.value)}
+                    placeholder="e.g., Uses Docker, Python 3.11, PostgreSQL"
+                  />
+                </div>
+
+                <Button
+                  onClick={handleGenerateSetup}
+                  disabled={isLoading}
+                  className="w-full"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="h-4 w-4 mr-2" />
+                      Generate Setup Script
+                    </>
+                  )}
+                </Button>
+
+                {generatedSetup && (
+                  <div className="space-y-4">
+                    <div className="space-y-2 p-4 bg-muted rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <Label>Generated Script</Label>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopy(generatedSetup)}
+                        >
+                          {copied ? (
+                            <Check className="h-4 w-4" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                      <pre className="text-xs bg-background p-3 rounded overflow-x-auto max-h-[150px] overflow-y-auto font-mono">
+                        {generatedSetup}
+                      </pre>
+                    </div>
+
+                    {setupNotes.length > 0 && (
+                      <div className="space-y-2 p-4 bg-muted rounded-lg">
+                        <Label>Notes</Label>
+                        <ul className="text-sm space-y-1">
+                          {setupNotes.map((note, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-muted-foreground">•</span>
+                              {note}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <Button onClick={handleApplySetup} className="w-full">
                       Apply to Step
                     </Button>
                   </div>

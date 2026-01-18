@@ -91,6 +91,15 @@ export function StepIDE({
     setAutoSaveTimer(timer);
   };
 
+  // Clear auto-save timer when save completes (hasUnsavedChanges becomes false)
+  // This prevents stale saves after manual save or navigation
+  useEffect(() => {
+    if (!hasUnsavedChanges && autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+      setAutoSaveTimer(null);
+    }
+  }, [hasUnsavedChanges, autoSaveTimer]);
+
   // Keyboard shortcut for save
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -160,6 +169,7 @@ export function StepIDE({
             currentSetupScript={setupScript}
             currentValidationScript={validationScript}
             onApplyInstructions={onInstructionsChange}
+            onApplySetup={onSetupScriptChange}
             onApplyValidation={(script, newHints) => {
               onValidationScriptChange(script);
               if (onHintsChange) {
