@@ -152,6 +152,12 @@ export function MarketingLanding() {
               Create Your Account <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>
+          <p className="text-muted-foreground text-sm mt-4">
+            Questions? Contact{' '}
+            <a href="mailto:me@davidgeorgehope.com" className="text-primary hover:underline">
+              me@davidgeorgehope.com
+            </a>
+          </p>
         </div>
       </section>
     </div>
