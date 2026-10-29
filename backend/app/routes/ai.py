@@ -11,7 +11,7 @@ from ..database import get_db
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-XAI_MODEL = os.getenv("XAI_MODEL", "grok-4.3")
+XAI_MODEL = os.getenv("XAI_MODEL", "grok-4.7")
 
 # Initialize xAI client (OpenAI-compatible API)
 client = None
