@@ -1,29 +1,40 @@
-"""AI-powered assistance endpoints using Claude API"""
+"""AI-powered assistance endpoints using xAI Grok"""
 import os
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import anthropic
+from openai import OpenAI
 
 from .. import models, auth
 from ..database import get_db
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-# Initialize Anthropic client
+XAI_MODEL = os.getenv("XAI_MODEL", "grok-4.3")
+
+# Initialize xAI client (OpenAI-compatible API)
 client = None
 def get_client():
     global client
     if client is None:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        api_key = os.getenv("XAI_API_KEY")
         if not api_key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="AI service not configured"
             )
-        client = anthropic.Anthropic(api_key=api_key)
+        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
     return client
+
+
+def _chat(ai_client, system: str, messages: list, max_tokens: int) -> str:
+    resp = ai_client.chat.completions.create(
+        model=XAI_MODEL,
+        max_tokens=max_tokens,
+        messages=[{"role": "system", "content": system}, *messages],
+    )
+    return resp.choices[0].message.content or ""
 
 
 # Request/Response schemas
@@ -137,14 +148,9 @@ The learner is stuck and needs a hint to proceed.
 """
 
     try:
-        message = ai_client.messages.create(
-            model="claude-sonnet-5-5",
-            max_tokens=1024,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_content}]
-        )
+        message = _chat(ai_client, system_prompt, [{"role": "user", "content": user_content}], 1024)
 
-        response_text = message.content[0].text
+        response_text = message
 
         # Extract suggestions if the response contains a list
         suggestions = []
@@ -201,14 +207,9 @@ Provide:
 Keep each explanation concise."""
 
     try:
-        message = ai_client.messages.create(
-            model="claude-sonnet-5-5",
-            max_tokens=2048,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_content}]
-        )
+        message = _chat(ai_client, system_prompt, [{"role": "user", "content": user_content}], 2048)
 
-        response_text = message.content[0].text
+        response_text = message
 
         # Parse line-by-line explanations
         line_explanations = []
@@ -267,15 +268,10 @@ Generate Markdown instructions that include:
 4. Expected outcomes"""
 
     try:
-        message = ai_client.messages.create(
-            model="claude-sonnet-5-5",
-            max_tokens=2048,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_content}]
-        )
+        message = _chat(ai_client, system_prompt, [{"role": "user", "content": user_content}], 2048)
 
         return GenerateInstructionsResponse(
-            instructions_md=message.content[0].text
+            instructions_md=message
         )
 
     except Exception as e:
@@ -322,14 +318,9 @@ Generate:
 Return the script in a code block and hints as a numbered list."""
 
     try:
-        message = ai_client.messages.create(
-            model="claude-sonnet-5-5",
-            max_tokens=2048,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_content}]
-        )
+        message = _chat(ai_client, system_prompt, [{"role": "user", "content": user_content}], 2048)
 
-        response_text = message.content[0].text
+        response_text = message
 
         # Extract script from code block
         script = ""
@@ -397,14 +388,9 @@ Generate hints that progressively help learners figure out what to do.
 Format as a numbered list."""
 
     try:
-        message = ai_client.messages.create(
-            model="claude-sonnet-5-5",
-            max_tokens=1024,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_content}]
-        )
+        message = _chat(ai_client, system_prompt, [{"role": "user", "content": user_content}], 1024)
 
-        response_text = message.content[0].text
+        response_text = message
 
         # Extract hints from numbered list
         hints = []
@@ -483,14 +469,9 @@ Generate:
 Return the script in a ```bash code block and notes as a numbered list after the script."""
 
     try:
-        message = ai_client.messages.create(
-            model="claude-sonnet-5-5",
-            max_tokens=2048,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_content}]
-        )
+        message = _chat(ai_client, system_prompt, [{"role": "user", "content": user_content}], 2048)
 
-        response_text = message.content[0].text
+        response_text = message
 
         # Extract script from code block
         script = ""
@@ -596,14 +577,9 @@ Generate:
 Return the script in a ```bash code block and notes as a numbered list."""
 
     try:
-        message = ai_client.messages.create(
-            model="claude-sonnet-5-5",
-            max_tokens=2048,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_content}]
-        )
+        message = _chat(ai_client, system_prompt, [{"role": "user", "content": user_content}], 2048)
 
-        response_text = message.content[0].text
+        response_text = message
 
         # Extract script from code block
         script = ""
