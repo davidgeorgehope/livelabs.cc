@@ -138,7 +138,7 @@ The learner is stuck and needs a hint to proceed.
 
     try:
         message = ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             max_tokens=1024,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}]
@@ -202,7 +202,7 @@ Keep each explanation concise."""
 
     try:
         message = ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             max_tokens=2048,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}]
@@ -268,7 +268,7 @@ Generate Markdown instructions that include:
 
     try:
         message = ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             max_tokens=2048,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}]
@@ -323,7 +323,7 @@ Return the script in a code block and hints as a numbered list."""
 
     try:
         message = ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             max_tokens=2048,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}]
@@ -398,7 +398,7 @@ Format as a numbered list."""
 
     try:
         message = ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             max_tokens=1024,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}]
@@ -484,7 +484,7 @@ Return the script in a ```bash code block and notes as a numbered list after the
 
     try:
         message = ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             max_tokens=2048,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}]
@@ -597,7 +597,7 @@ Return the script in a ```bash code block and notes as a numbered list."""
 
     try:
         message = ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5-5",
             max_tokens=2048,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}]
